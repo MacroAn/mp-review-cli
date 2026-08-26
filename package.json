@@ -1,6 +1,6 @@
 {
   "name": "mp-review-cli",
-  "version": "1.5.1",
+  "version": "1.7.1",
   "private": true,
   "description": "Submit the latest WeChat Mini Program development version for review through the official web console.",
   "type": "module",

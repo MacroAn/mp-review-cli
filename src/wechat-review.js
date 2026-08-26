@@ -5,7 +5,7 @@ import jsQR from 'jsqr'
 import { PNG } from 'pngjs'
 import puppeteer from 'puppeteer-core'
 import qrcodeTerminal from 'qrcode-terminal'
-import { finishProgress, showQr, updateProgress } from './progress.js'
+import { finishProgress, promptInput, showQr, updateProgress } from './progress.js'
 
 const LOGIN_URL = 'https://mp.weixin.qq.com/'
 const VERSION_URL = token => `https://mp.weixin.qq.com/wxamp/wacodepage/getcodepage?token=${encodeURIComponent(token)}&lang=zh_CN`
@@ -237,6 +237,61 @@ async function waitForAuditPage(browser) {
   throw new Error('未能打开审核资料页面，微信后台页面结构可能已经变化')
 }
 
+async function setFormValue(element, value) {
+  await element.evaluate((field, fieldValue) => {
+    const prototype = field instanceof HTMLTextAreaElement
+      ? HTMLTextAreaElement.prototype
+      : HTMLInputElement.prototype
+    const setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set
+    setter?.call(field, fieldValue)
+    field.dispatchEvent(new Event('input', { bubbles: true }))
+    field.dispatchEvent(new Event('change', { bubbles: true }))
+    field.dispatchEvent(new Event('blur', { bubbles: true }))
+  }, value)
+}
+
+export async function fillReviewCredentials(page, account, password) {
+  const selected = await page.evaluate(() => {
+    const candidates = [...document.querySelectorAll('label, span, div')]
+      .filter(element => (element.textContent || '').trim() === '需登录账号才可使用')
+      .sort((left, right) => left.childElementCount - right.childElementCount)
+    const target = candidates[0]
+    if (!target)
+      return false
+    const clickable = target.closest('label') || target
+    if (clickable instanceof HTMLElement) {
+      clickable.click()
+      return true
+    }
+    return false
+  })
+  if (!selected)
+    throw new Error('未找到“需登录账号才可使用”选项，微信审核页面结构可能已经变化')
+
+  await page.waitForFunction(() => {
+    return Boolean(
+      document.querySelector('input[placeholder*="审核测试使用的测试账号"]')
+      && document.querySelector('input[placeholder*="测试账号的登录密码"]')
+      && document.querySelector('textarea[placeholder*="测试流程"]'),
+    )
+  }, { timeout: PAGE_TIMEOUT_MS })
+
+  const accountInput = await page.$('input[placeholder*="审核测试使用的测试账号"]')
+  const passwordInput = await page.$('input[placeholder*="测试账号的登录密码"]')
+  const notesInput = await page.$('textarea[placeholder*="测试流程"]')
+  if (!accountInput || !passwordInput || !notesInput)
+    throw new Error('未找到测试账号、密码或备注输入框')
+
+  const notes = `线上真实生产环境,请手下留情\n测试账号: ${account}\n测试密码: ${password}`
+  if (Array.from(notes).length > 200)
+    throw new Error('测试备注超过微信限制的 200 字，请缩短测试账号或密码')
+  await setFormValue(accountInput, account)
+  await setFormValue(passwordInput, password)
+  await setFormValue(notesInput, notes)
+  await notesInput.evaluate(element => element.scrollIntoView({ behavior: 'auto', block: 'center' }))
+  return notes
+}
+
 async function openAuditForm(browser, page, selectedVersion) {
   const disabled = await selectedVersion.button.evaluate(element => element.classList.contains('weui-desktop-btn_disabled'))
   if (disabled)
@@ -305,7 +360,12 @@ export async function submitAudit(page) {
   return true
 }
 
-export async function runWechatReview({ expectedVersion, projectName = path.basename(process.cwd()) } = {}) {
+export async function runWechatReview({
+  expectedVersion,
+  inspectBeforeSubmit = false,
+  projectName = path.basename(process.cwd()),
+  visible = false,
+} = {}) {
   const startMessage = expectedVersion
     ? `准备提审 HBuilderX 已上传版本 ${expectedVersion}`
     : '准备打开微信公众平台（不会上传代码）'
@@ -313,7 +373,7 @@ export async function runWechatReview({ expectedVersion, projectName = path.base
 
   const browser = await puppeteer.launch({
     executablePath: findBrowserPath(),
-    headless: true,
+    headless: !visible,
     defaultViewport: { width: 1440, height: 900, deviceScaleFactor: 3 },
   })
 
@@ -334,6 +394,20 @@ export async function runWechatReview({ expectedVersion, projectName = path.base
 
     const auditPage = await openAuditForm(browser, page, selectedVersion)
     await auditPage.bringToFront()
+
+    const account = (await promptInput(projectName, '请输入审核测试账号：')).trim()
+    if (!account)
+      throw new Error('测试账号不能为空')
+    const password = await promptInput(projectName, '请输入审核测试密码：', { secret: true })
+    if (!password)
+      throw new Error('测试密码不能为空')
+    updateProgress(projectName, '正在填写审核测试账号和备注')
+    await fillReviewCredentials(auditPage, account, password)
+
+    if (inspectBeforeSubmit) {
+      await auditPage.bringToFront()
+      await promptInput(projectName, '请检查浏览器中的审核信息，确认后按 Enter 继续：')
+    }
 
     updateProgress(projectName, `正在自动确认并提交版本 ${version}`)
     await submitAudit(auditPage)

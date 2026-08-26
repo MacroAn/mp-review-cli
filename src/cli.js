@@ -5,7 +5,7 @@ import { getPublishConfig, printPublishConfig, runHBuilderPublish } from './hbui
 import { failProgress } from './progress.js'
 import { runWechatReview } from './wechat-review.js'
 
-const VERSION = '1.5.1'
+const VERSION = '1.7.1'
 
 function printHelp() {
   console.log(`Usage: mp [command] [options]
@@ -16,6 +16,7 @@ Commands:
   full              Build and upload with HBuilderX, then submit that version
 
 Options:
+  --visible         Show Chrome and pause before final review submission
   -h, --help      Show help
   -v, --version   Show version
 
@@ -40,7 +41,7 @@ if (args.has('-v') || args.has('--version')) {
 
 const command = rawArgs.find(arg => !arg.startsWith('-')) || 'review'
 const supportedCommands = new Set(['review', 'config', 'full'])
-const supportedArgs = new Set(['-y', '--yes', command])
+const supportedArgs = new Set(['-y', '--yes', '--visible', command])
 const unknownArgs = [...args].filter(arg => !supportedArgs.has(arg))
 if (unknownArgs.length > 0) {
   console.error(`Unknown option: ${unknownArgs.join(', ')}`)
@@ -55,8 +56,9 @@ if (!supportedCommands.has(command)) {
 }
 
 const operation = async () => {
+  const visible = args.has('--visible')
   if (command === 'review') {
-    await runWechatReview()
+    await runWechatReview({ inspectBeforeSubmit: visible, visible })
     return
   }
 
@@ -67,7 +69,12 @@ const operation = async () => {
   }
 
   await runHBuilderPublish(config)
-  await runWechatReview({ expectedVersion: config.version, projectName: config.project })
+  await runWechatReview({
+    expectedVersion: config.version,
+    inspectBeforeSubmit: visible,
+    projectName: config.project,
+    visible,
+  })
 }
 
 operation()

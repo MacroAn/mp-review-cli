@@ -4,6 +4,7 @@ import test from 'node:test'
 import puppeteer from 'puppeteer-core'
 import {
   acceptReviewRules,
+  fillReviewCredentials,
   selectLatestDevelopmentVersion,
   submitAudit,
   waitAndClickVisibleButton,
@@ -57,6 +58,30 @@ test('accepts the current review notice dialog and clicks next', async () => {
 
     assert.equal(clicked, true)
     assert.equal(await page.evaluate(() => document.body.dataset.nextClicked), 'true')
+
+    await page.setContent(`
+      <label id="login-required"><input type="radio" name="login">需登录账号才可使用</label>
+      <div id="credentials" style="display: none">
+        <input placeholder="请填写提供用于审核测试使用的测试账号">
+        <input placeholder="请填写测试账号的登录密码">
+        <textarea placeholder="若测试流程特殊，请描述测试流程以便审核人员进行审核"></textarea>
+      </div>
+      <script>
+        document.querySelector('#login-required').addEventListener('click', () => {
+          document.querySelector('#credentials').style.display = 'block'
+        })
+      </script>
+    `)
+    const notes = await fillReviewCredentials(page, 'review-user', 'review-password')
+    const credentialValues = await page.evaluate(() => ({
+      account: document.querySelector('input[placeholder*="审核测试使用的测试账号"]').value,
+      password: document.querySelector('input[placeholder*="测试账号的登录密码"]').value,
+      notes: document.querySelector('textarea').value,
+    }))
+    assert.equal(credentialValues.account, 'review-user')
+    assert.equal(credentialValues.password, 'review-password')
+    assert.equal(notes, '线上真实生产环境,请手下留情\n测试账号: review-user\n测试密码: review-password')
+    assert.equal(credentialValues.notes, notes)
 
     await page.setContent(`
       <a class="btn_primary" id="final-submit" href="javascript:void(0)" style="display: none">提交审核</a>

@@ -1,4 +1,5 @@
 import process from 'node:process'
+import readline from 'node:readline/promises'
 
 let activeProject = null
 let initialized = false
@@ -74,7 +75,7 @@ function clearQr() {
 }
 
 export function startSpinner(projectName, step) {
-  const frames = ['|', '/', '-', '\\']
+  const frames = ['.', '..', '...']
   let frameIndex = 0
   updateProgress(projectName, step, frames[frameIndex])
 
@@ -84,10 +85,59 @@ export function startSpinner(projectName, step) {
   const timer = setInterval(() => {
     frameIndex = (frameIndex + 1) % frames.length
     updateProgress(projectName, step, frames[frameIndex])
-  }, 120)
+  }, 1000)
 
   return () => {
     clearInterval(timer)
     updateProgress(projectName, step)
   }
+}
+
+export function promptInput(projectName, label, { secret = false } = {}) {
+  if (!process.stdin.isTTY || typeof process.stdin.setRawMode !== 'function') {
+    const terminal = readline.createInterface({ input: process.stdin, output: process.stdout })
+    return terminal.question(`${label}`).finally(() => terminal.close())
+  }
+
+  return new Promise((resolve, reject) => {
+    let value = ''
+    const wasRaw = process.stdin.isRaw
+    const render = () => {
+      const displayedValue = secret ? '*'.repeat(Array.from(value).length) : value
+      updateProgress(projectName, `${label}${displayedValue}`)
+    }
+    const cleanup = () => {
+      process.stdin.off('data', onData)
+      process.stdin.setRawMode(Boolean(wasRaw))
+      process.stdin.pause()
+    }
+    const onData = (chunk) => {
+      const text = chunk.toString('utf8')
+      if (text.includes('\u001B'))
+        return
+
+      for (const character of Array.from(text)) {
+        if (character === '\u0003') {
+          cleanup()
+          reject(new Error('用户取消输入'))
+          return
+        }
+        if (character === '\r' || character === '\n') {
+          cleanup()
+          resolve(value)
+          return
+        }
+        if (character === '\u0008' || character === '\u007F')
+          value = Array.from(value).slice(0, -1).join('')
+        else if (character >= ' ')
+          value += character
+      }
+      render()
+    }
+
+    process.stdin.setRawMode(true)
+    process.stdin.resume()
+    process.stdin.on('data', onData)
+    render()
+  })
 }
