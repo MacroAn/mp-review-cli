@@ -2,9 +2,10 @@
 
 import process from 'node:process'
 import { getPublishConfig, printPublishConfig, runHBuilderPublish } from './hbuilder-publish.js'
+import { failProgress } from './progress.js'
 import { runWechatReview } from './wechat-review.js'
 
-const VERSION = '1.4.1'
+const VERSION = '1.5.1'
 
 function printHelp() {
   console.log(`Usage: mp [command] [options]
@@ -65,15 +66,12 @@ const operation = async () => {
     return
   }
 
-  printPublishConfig(config)
   await runHBuilderPublish(config)
-  await runWechatReview({ expectedVersion: config.version })
+  await runWechatReview({ expectedVersion: config.version, projectName: config.project })
 }
 
 operation()
   .catch((error) => {
-    if (process.stdout.isTTY)
-      process.stdout.write('\r\x1B[2K')
-    console.error(`失败：${error.message}`)
+    failProgress(error.message)
     process.exitCode = 1
   })

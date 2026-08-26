@@ -1,9 +1,11 @@
 import fs from 'node:fs'
+import path from 'node:path'
 import process from 'node:process'
 import jsQR from 'jsqr'
 import { PNG } from 'pngjs'
 import puppeteer from 'puppeteer-core'
 import qrcodeTerminal from 'qrcode-terminal'
+import { finishProgress, showQr, updateProgress } from './progress.js'
 
 const LOGIN_URL = 'https://mp.weixin.qq.com/'
 const VERSION_URL = token => `https://mp.weixin.qq.com/wxamp/wacodepage/getcodepage?token=${encodeURIComponent(token)}&lang=zh_CN`
@@ -19,26 +21,13 @@ const DEFAULT_BROWSER_PATHS = [
 
 const sleep = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))
 
-function updateProgress(message) {
-  const text = compactText(message)
-  if (process.stdout.isTTY)
-    process.stdout.write(`\r\x1B[2K${text}`)
-  else
-    process.stdout.write(`\r${text}`)
-}
-
-function finishProgress(message) {
-  updateProgress(message)
-  process.stdout.write('\n')
-}
-
 function renderTerminalQr(content) {
   return new Promise((resolve) => {
     qrcodeTerminal.generate(content, { small: true }, resolve)
   })
 }
 
-async function showLoginQr(page) {
+async function showLoginQr(page, projectName) {
   const selector = '.login__type__container__scan__qrcode'
   const qrImage = await page.waitForSelector(selector, { visible: true, timeout: PAGE_TIMEOUT_MS })
   await page.waitForFunction((imageSelector) => {
@@ -52,9 +41,7 @@ async function showLoginQr(page) {
     const decoded = jsQR(new Uint8ClampedArray(png.data), png.width, png.height)
     if (decoded?.data) {
       const terminalQr = await renderTerminalQr(decoded.data)
-      if (process.stdout.isTTY)
-        process.stdout.write('\r\x1B[2K')
-      process.stdout.write(`请使用微信扫描二维码，并选择目标小程序：\n${terminalQr}\n`)
+      showQr(projectName, '请使用微信扫描二维码并选择目标小程序', terminalQr)
       return
     }
     await sleep(500)
@@ -318,11 +305,11 @@ export async function submitAudit(page) {
   return true
 }
 
-export async function runWechatReview({ expectedVersion } = {}) {
+export async function runWechatReview({ expectedVersion, projectName = path.basename(process.cwd()) } = {}) {
   const startMessage = expectedVersion
     ? `准备提审 HBuilderX 已上传版本 ${expectedVersion}`
     : '准备打开微信公众平台（不会上传代码）'
-  updateProgress(`[提审 1/6] 当前目录：${process.cwd()}；${startMessage}`)
+  updateProgress(projectName, startMessage)
 
   const browser = await puppeteer.launch({
     executablePath: findBrowserPath(),
@@ -333,24 +320,24 @@ export async function runWechatReview({ expectedVersion } = {}) {
   try {
     const loginPage = await browser.newPage()
     await loginPage.goto(LOGIN_URL, { waitUntil: 'domcontentloaded', timeout: PAGE_TIMEOUT_MS })
-    updateProgress('[提审 2/6] 正在获取微信登录二维码')
-    await showLoginQr(loginPage)
+    updateProgress(projectName, '正在获取微信登录二维码')
+    await showLoginQr(loginPage, projectName)
 
     const authenticated = await waitForAuthenticatedPage(browser)
     const page = authenticated.page
-    updateProgress('[提审 3/6] 登录成功，正在读取开发版本')
+    updateProgress(projectName, '登录成功，正在读取开发版本')
     await page.goto(VERSION_URL(authenticated.token), { waitUntil: 'domcontentloaded', timeout: PAGE_TIMEOUT_MS })
 
     const selectedVersion = await selectLatestDevelopmentVersion(page, expectedVersion)
     const version = parseVersionNumber(selectedVersion.text)
-    updateProgress(`[提审 4/6] 已选择开发版本 ${version}，正在打开审核资料`)
+    updateProgress(projectName, `已选择开发版本 ${version}，正在打开审核资料`)
 
     const auditPage = await openAuditForm(browser, page, selectedVersion)
     await auditPage.bringToFront()
 
-    updateProgress(`[提审 5/6] 正在自动确认并提交版本 ${version}`)
+    updateProgress(projectName, `正在自动确认并提交版本 ${version}`)
     await submitAudit(auditPage)
-    finishProgress(`[提审 6/6] 版本 ${version} 提交审核成功`)
+    finishProgress(projectName, `版本 ${version} 提交审核成功`)
   }
   finally {
     await browser.close()

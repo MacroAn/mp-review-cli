@@ -14,7 +14,7 @@
 - 自动勾选并通过审核须知
 - 自动点击最终提交审核
 - 自动处理微信可能出现的隐私二次确认
-- 单行显示当前执行进度
+- 固定两行显示“当前项目”和“当前步骤”，HBuilderX 上传阶段显示加载动画
 - 支持 CMD、Windows PowerShell 和 PowerShell 7
 - 提供 `mp`、`mp.cmd` 和 `wxmp` 命令
 - 提供一键安装 BAT 脚本
@@ -120,6 +120,8 @@ mp full
 ```
 
 `mp full` 会执行真实的 HBuilderX 编译上传和微信提审，并且不要求二次输入确认。HBuilderX 返回非零退出码时，流程会立即停止，不会进入提审。
+
+完整流程默认隐藏 HBuilderX 的编译、warning、上传调试和 PowerShell 内部日志。第一行固定显示当前项目，第二行实时覆盖当前步骤；HBuilderX 编译上传期间显示 `| / - \\` 加载动画。二维码从第三行开始显示，扫码登录成功后自动清除二维码区域，并继续在第二行更新进度。运行 `mp config` 时仍会显示完整配置，失败时第二行会保留错误。
 
 ### 配置文件
 
@@ -280,6 +282,7 @@ mp-review-cli/
 |-- src/
 |   |-- cli.js
 |   |-- hbuilder-publish.js
+|   |-- progress.js
 |   `-- wechat-review.js
 |-- test/
 |   |-- hbuilder-publish.test.js

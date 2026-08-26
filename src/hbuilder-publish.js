@@ -5,6 +5,7 @@ import path from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 import JSON5 from 'json5'
+import { startSpinner, updateProgress } from './progress.js'
 
 const CONFIG_FILE = '.mp-review.json'
 const MODULE_DIRECTORY = path.dirname(fileURLToPath(import.meta.url))
@@ -348,8 +349,6 @@ async function executeElevatedPublish(config, args) {
     }
 
     const result = JSON.parse(fs.readFileSync(resultPath, 'utf8'))
-    if (result.output)
-      process.stdout.write(result.output.endsWith('\n') ? result.output : `${result.output}\n`)
     return { code: Number(result.exitCode), output: String(result.output || '') }
   }
   finally {
@@ -366,20 +365,26 @@ export async function runHBuilderPublish(config) {
   const needsElevation = requiresElevatedHBuilderCli(config)
 
   if (needsElevation)
-    console.log('[发行 1/3] HBuilderX 以管理员身份运行，请在 UAC 窗口中允许本次上传')
+    updateProgress(config.project, '请在 UAC 窗口中允许 HBuilderX 上传')
   else {
-    console.log(`[发行 1/3] 正在连接 HBuilderX：${config.hbuilderCli}`)
+    updateProgress(config.project, '正在连接 HBuilderX')
     await ensureHBuilderXReady(config)
   }
 
-  console.log(`[发行 2/3] 正在编译并上传版本 ${config.version}`)
-  const result = needsElevation
-    ? await executeElevatedPublish(config, args)
-    : await executeCli(config.hbuilderCli, args, {
-        cwd: config.projectRoot,
-        echo: true,
-        timeoutMs: 30 * 60 * 1000,
-      })
+  const stopSpinner = startSpinner(config.project, `HBuilderX 正在编译并上传版本 ${config.version}`)
+  let result
+  try {
+    result = needsElevation
+      ? await executeElevatedPublish(config, args)
+      : await executeCli(config.hbuilderCli, args, {
+          cwd: config.projectRoot,
+          echo: false,
+          timeoutMs: 30 * 60 * 1000,
+        })
+  }
+  finally {
+    stopSpinner()
+  }
   assertPublishSucceeded(result.code, result.output)
-  console.log(`[发行 3/3] HBuilderX 版本 ${config.version} 上传成功`)
+  updateProgress(config.project, `HBuilderX 版本 ${config.version} 上传成功，准备提审`)
 }
