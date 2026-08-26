@@ -1,0 +1,70 @@
+import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import test from 'node:test'
+import puppeteer from 'puppeteer-core'
+import { acceptReviewRules, submitAudit, waitAndClickVisibleButton } from '../src/wechat-review.js'
+
+const browserPaths = [
+  'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+  'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+]
+
+test('accepts the current review notice dialog and clicks next', async () => {
+  const executablePath = browserPaths.find(browserPath => fs.existsSync(browserPath))
+  assert.ok(executablePath, 'Chrome or Edge is required for this test')
+
+  const browser = await puppeteer.launch({ executablePath, headless: true })
+  try {
+    const page = await browser.newPage()
+    await page.setContent(`
+      <div class="weui-desktop-dialog__wrp">
+        <h4>提交审核的相关须知</h4>
+        <p>确认提交审核？</p>
+        <div class="weui-desktop-icon-checkbox" id="review-checkbox"></div>
+        <span>已阅读并了解平台审核规则</span>
+        <button disabled>下一步</button>
+      </div>
+      <script>
+        document.querySelector('#review-checkbox').addEventListener('click', () => {
+          document.querySelector('button').disabled = false
+        })
+        document.querySelector('button').addEventListener('click', () => {
+          document.body.dataset.nextClicked = 'true'
+        })
+      </script>
+    `)
+
+    await acceptReviewRules(page)
+    const clicked = await waitAndClickVisibleButton(page, ['下一步'], '.weui-desktop-dialog__wrp', 2000)
+
+    assert.equal(clicked, true)
+    assert.equal(await page.evaluate(() => document.body.dataset.nextClicked), 'true')
+
+    await page.setContent(`
+      <a class="btn_primary" id="final-submit" href="javascript:void(0)" style="display: none">提交审核</a>
+      <div class="weui-desktop-dialog__wrp" id="privacy-dialog" style="display: none">
+        <h4>确认提交审核</h4>
+        <p>当前选择未采集用户隐私，请确认是否继续提交？</p>
+        <button>取消</button>
+        <button class="btn_primary">确定，继续提交</button>
+      </div>
+      <script>
+        setTimeout(() => {
+          document.querySelector('#final-submit').style.display = 'inline-block'
+        }, 300)
+        document.querySelector('#final-submit').addEventListener('click', () => {
+          document.querySelector('#privacy-dialog').style.display = 'block'
+        })
+        document.querySelector('#privacy-dialog .btn_primary').addEventListener('click', () => {
+          document.body.textContent = '已提交审核'
+        })
+      </script>
+    `)
+
+    assert.equal(await submitAudit(page), true)
+    assert.match(await page.evaluate(() => document.body.innerText), /已提交审核/)
+  }
+  finally {
+    await browser.close()
+  }
+})

@@ -1,0 +1,25 @@
+{
+  "name": "mp-review-cli",
+  "version": "1.2.0",
+  "private": true,
+  "description": "Submit the latest WeChat Mini Program development version for review through the official web console.",
+  "type": "module",
+  "bin": {
+    "mp": "src/cli.js",
+    "wxmp": "src/cli.js"
+  },
+  "scripts": {
+    "check": "node --check src/cli.js && node --check src/wechat-review.js",
+    "start": "node src/cli.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "jsqr": "^1.4.0",
+    "pngjs": "^7.0.0",
+    "puppeteer-core": "^25.9.0",
+    "qrcode-terminal": "^0.12.0"
+  }
+}
