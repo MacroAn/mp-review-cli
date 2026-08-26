@@ -2,7 +2,12 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import test from 'node:test'
 import puppeteer from 'puppeteer-core'
-import { acceptReviewRules, submitAudit, waitAndClickVisibleButton } from '../src/wechat-review.js'
+import {
+  acceptReviewRules,
+  selectLatestDevelopmentVersion,
+  submitAudit,
+  waitAndClickVisibleButton,
+} from '../src/wechat-review.js'
 
 const browserPaths = [
   'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
@@ -16,6 +21,19 @@ test('accepts the current review notice dialog and clicks next', async () => {
   const browser = await puppeteer.launch({ executablePath, headless: true })
   try {
     const page = await browser.newPage()
+    await page.setContent(`
+      <div class="mod_default_box code_version_dev">
+        <div class="code_version_log">版本号 1.0.0 提交时间 2026-08-26 10:00:00 <button class="weui-desktop-btn weui-desktop-btn_primary">提交审核</button></div>
+        <div class="code_version_log">版本号 2.0.0 提交时间 2026-08-26 11:00:00 <button class="weui-desktop-btn weui-desktop-btn_primary">提交审核</button></div>
+      </div>
+    `)
+    const selectedVersion = await selectLatestDevelopmentVersion(page, '1.0.0')
+    assert.equal(selectedVersion.version, '1.0.0')
+    await assert.rejects(
+      selectLatestDevelopmentVersion(page, '3.0.0'),
+      /未找到本次上传的版本 3.0.0/,
+    )
+
     await page.setContent(`
       <div class="weui-desktop-dialog__wrp">
         <h4>提交审核的相关须知</h4>

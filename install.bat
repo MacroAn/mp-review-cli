@@ -43,10 +43,21 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%\configure-powe
 if errorlevel 1 goto :powershell_failed
 
 echo [6/6] Verifying the installation...
-if not exist "%USER_NPM%\mp.cmd" goto :verify_failed
-if not exist "%USER_NPM%\wxmp.cmd" goto :verify_failed
+set "VERIFY_ATTEMPT=0"
+
+:verify_retry
+set /a VERIFY_ATTEMPT+=1
+if not exist "%USER_NPM%\mp.cmd" goto :verify_wait
+if not exist "%USER_NPM%\wxmp.cmd" goto :verify_wait
 call "%USER_NPM%\mp.cmd" --version
-if errorlevel 1 goto :verify_failed
+if not errorlevel 1 goto :verify_succeeded
+
+:verify_wait
+if %VERIFY_ATTEMPT% GEQ 5 goto :verify_failed
+timeout /t 1 /nobreak >nul
+goto :verify_retry
+
+:verify_succeeded
 
 echo.
 echo Installation completed. Open a new terminal, enter a Mini Program project, and run: mp

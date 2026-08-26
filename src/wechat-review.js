@@ -128,7 +128,7 @@ async function waitForAuthenticatedPage(browser) {
   throw new Error('登录等待超时，请重新运行 mp 后在 5 分钟内扫码登录')
 }
 
-async function selectLatestDevelopmentVersion(page) {
+export async function selectLatestDevelopmentVersion(page, expectedVersion) {
   const cardSelector = '.mod_default_box.code_version_dev .code_version_log'
   await page.waitForSelector(cardSelector, { timeout: PAGE_TIMEOUT_MS })
   const cards = await page.$$(cardSelector)
@@ -144,14 +144,21 @@ async function selectLatestDevelopmentVersion(page) {
       button,
       text,
       timestamp: parseSubmitTime(text),
+      version: parseVersionNumber(text),
     })
   }
 
   if (candidates.length === 0)
     throw new Error('未找到可提交审核的开发版本，请先在 HBuilderX 中上传代码')
 
-  candidates.sort((left, right) => right.timestamp - left.timestamp)
-  return candidates[0]
+  const eligibleCandidates = expectedVersion
+    ? candidates.filter(candidate => candidate.version === expectedVersion)
+    : candidates
+  if (eligibleCandidates.length === 0)
+    throw new Error(`微信公众平台未找到本次上传的版本 ${expectedVersion}`)
+
+  eligibleCandidates.sort((left, right) => right.timestamp - left.timestamp)
+  return eligibleCandidates[0]
 }
 
 async function clickVisibleButton(page, acceptedTexts, rootSelector = 'body') {
@@ -311,8 +318,11 @@ export async function submitAudit(page) {
   return true
 }
 
-export async function runWechatReview() {
-  updateProgress(`[1/6] 当前目录：${process.cwd()}；准备打开微信公众平台（不会上传代码）`)
+export async function runWechatReview({ expectedVersion } = {}) {
+  const startMessage = expectedVersion
+    ? `准备提审 HBuilderX 已上传版本 ${expectedVersion}`
+    : '准备打开微信公众平台（不会上传代码）'
+  updateProgress(`[提审 1/6] 当前目录：${process.cwd()}；${startMessage}`)
 
   const browser = await puppeteer.launch({
     executablePath: findBrowserPath(),
@@ -323,24 +333,24 @@ export async function runWechatReview() {
   try {
     const loginPage = await browser.newPage()
     await loginPage.goto(LOGIN_URL, { waitUntil: 'domcontentloaded', timeout: PAGE_TIMEOUT_MS })
-    updateProgress('[2/6] 正在获取微信登录二维码')
+    updateProgress('[提审 2/6] 正在获取微信登录二维码')
     await showLoginQr(loginPage)
 
     const authenticated = await waitForAuthenticatedPage(browser)
     const page = authenticated.page
-    updateProgress('[3/6] 登录成功，正在读取开发版本')
+    updateProgress('[提审 3/6] 登录成功，正在读取开发版本')
     await page.goto(VERSION_URL(authenticated.token), { waitUntil: 'domcontentloaded', timeout: PAGE_TIMEOUT_MS })
 
-    const selectedVersion = await selectLatestDevelopmentVersion(page)
+    const selectedVersion = await selectLatestDevelopmentVersion(page, expectedVersion)
     const version = parseVersionNumber(selectedVersion.text)
-    updateProgress(`[4/6] 已选择最新开发版本 ${version}，正在打开审核资料`)
+    updateProgress(`[提审 4/6] 已选择开发版本 ${version}，正在打开审核资料`)
 
     const auditPage = await openAuditForm(browser, page, selectedVersion)
     await auditPage.bringToFront()
 
-    updateProgress(`[5/6] 正在自动确认并提交版本 ${version}`)
+    updateProgress(`[提审 5/6] 正在自动确认并提交版本 ${version}`)
     await submitAudit(auditPage)
-    finishProgress(`[6/6] 版本 ${version} 提交审核成功`)
+    finishProgress(`[提审 6/6] 版本 ${version} 提交审核成功`)
   }
   finally {
     await browser.close()
