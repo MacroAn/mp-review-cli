@@ -26,7 +26,7 @@ test('resolves JSON5 project configuration and builds HBuilderX publish argument
     }`)
     fs.writeFileSync(path.join(projectRoot, '.mp-review.json'), JSON.stringify({
       description: 'release description',
-      hbuilderCli: './cli.exe',
+      hbuilderCli: '.',
       privateKey: './upload.key',
       project: 'sample-project',
       robot: 2,
@@ -52,6 +52,26 @@ test('resolves JSON5 project configuration and builds HBuilderX publish argument
       '--sourceMap', 'true',
       '--subPackage', 'hybrid-package',
     ])
+  }
+  finally {
+    fs.rmSync(projectRoot, { recursive: true, force: true })
+  }
+})
+
+test('accepts the configured HBuilderX executable path', () => {
+  const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mp-review-cli-hbuilder-'))
+  try {
+    const cliPath = path.join(projectRoot, 'cli.exe')
+    fs.writeFileSync(cliPath, '')
+    fs.writeFileSync(path.join(projectRoot, 'HBuilderX.exe'), '')
+    fs.writeFileSync(path.join(projectRoot, 'upload.key'), '')
+    fs.writeFileSync(path.join(projectRoot, 'manifest.json'), '{ versionName: "1.0.0", "mp-weixin": { appid: "wx-test" } }')
+    fs.writeFileSync(path.join(projectRoot, '.mp-review.json'), JSON.stringify({
+      hbuilderCli: './HBuilderX.exe',
+      privateKey: './upload.key',
+    }))
+
+    assert.equal(getPublishConfig(projectRoot).hbuilderCli, cliPath)
   }
   finally {
     fs.rmSync(projectRoot, { recursive: true, force: true })

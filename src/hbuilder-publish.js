@@ -42,6 +42,17 @@ function resolveProjectPath(projectRoot, configuredPath) {
     : path.resolve(projectRoot, configuredPath)
 }
 
+function resolveHBuilderCliPath(projectRoot, configuredPath) {
+  const resolvedPath = resolveProjectPath(projectRoot, configuredPath)
+  if (!resolvedPath)
+    return null
+  if (fs.existsSync(resolvedPath) && fs.statSync(resolvedPath).isDirectory())
+    return path.join(resolvedPath, 'cli.exe')
+  if (path.basename(resolvedPath).toLowerCase() === 'hbuilderx.exe')
+    return path.join(path.dirname(resolvedPath), 'cli.exe')
+  return resolvedPath
+}
+
 function findPrivateKey(projectRoot, configuredPath) {
   const explicitPath = process.env.MP_PRIVATE_KEY || configuredPath
   if (explicitPath)
@@ -59,8 +70,8 @@ function findPrivateKey(projectRoot, configuredPath) {
 function findHBuilderCli(projectRoot, configuredPath) {
   const explicitPath = process.env.HBUILDERX_CLI || process.env.MP_HBUILDER_CLI || configuredPath
   const candidates = [
-    resolveProjectPath(projectRoot, explicitPath),
-    ...DEFAULT_HBUILDER_CLI_PATHS,
+    resolveHBuilderCliPath(projectRoot, explicitPath),
+    ...DEFAULT_HBUILDER_CLI_PATHS.map(candidate => path.normalize(candidate)),
   ].filter(Boolean)
   return candidates.find(candidate => fs.existsSync(candidate)) || candidates[0] || null
 }

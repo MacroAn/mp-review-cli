@@ -85,7 +85,7 @@ export function startSpinner(projectName, step) {
   const timer = setInterval(() => {
     frameIndex = (frameIndex + 1) % frames.length
     updateProgress(projectName, step, frames[frameIndex])
-  }, 1000)
+  }, 500)
 
   return () => {
     clearInterval(timer)

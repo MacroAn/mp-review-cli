@@ -14,7 +14,7 @@
 - 自动勾选并通过审核须知
 - 自动点击最终提交审核
 - 自动处理微信可能出现的隐私二次确认
-- 固定两行显示“当前项目”和“当前步骤”，HBuilderX 上传阶段显示 `.`、`..`、`...` 加载动画
+- 固定两行显示“当前项目”和“当前步骤”，上传和提审等待阶段显示 `.`、`..`、`...` 加载动画
 - 自动选择“需登录账号才可使用”，并交互式填写审核测试账号、密码和备注
 - 支持 CMD、Windows PowerShell 和 PowerShell 7
 - 提供 `mp`、`mp.cmd` 和 `wxmp` 命令
@@ -136,7 +136,7 @@ mp full --visible
 mp review --visible
 ```
 
-完整流程默认隐藏 HBuilderX 的编译、warning、上传调试和 PowerShell 内部日志。第一行固定显示当前项目，第二行实时覆盖当前步骤；HBuilderX 编译上传期间循环显示 `.`、`..`、`...` 加载动画。二维码从第三行开始显示，扫码登录成功后自动清除二维码区域，并继续在第二行更新进度。运行 `mp config` 时仍会显示完整配置，失败时第二行会保留错误。
+执行时第一行固定显示当前项目，第二行实时覆盖当前步骤；HBuilderX 编译上传和微信提审等待期间循环显示 `.`、`..`、`...` 加载动画。二维码从第三行开始显示，扫码登录成功后自动清除二维码区域，并继续在第二行更新进度。扫码和终端输入期间动画会暂停，避免刷新二维码或输入内容。`mp full` 默认隐藏 HBuilderX 的编译、warning、上传调试和 PowerShell 内部日志；运行 `mp config` 时仍会显示完整配置，失败时第二行会保留错误。
 
 进入新版微信审核资料页面后，程序会选择“需登录账号才可使用”，并在终端第二行要求输入测试账号和测试密码。密码使用 `*` 遮挡且不会写入本地配置或日志。随后自动填写：
 
@@ -154,8 +154,8 @@ mp review --visible
 
 ```json5
 {
-  // 不同用户可以配置自己的 HBuilderX 安装位置
-  "hbuilderCli": "C:\\Program Files\\HBuilderX\\cli.exe",
+  // 可填写 HBuilderX 安装目录、HBuilderX.exe 或 cli.exe
+  "hbuilderCli": "D:/HBuilderX",
 
   // 相对路径以当前 uni-app 项目根目录为基准
   "privateKey": "./private.wx-appid.key",
@@ -171,7 +171,7 @@ mp review --visible
 
 默认值和自动发现规则：
 
-- `hbuilderCli`：优先读取环境变量 `HBUILDERX_CLI`/`MP_HBUILDER_CLI`，其次读取配置文件，再检查常见安装路径
+- `hbuilderCli`：优先读取环境变量 `HBUILDERX_CLI`/`MP_HBUILDER_CLI`，其次读取配置文件，再检查常见安装路径；可填写安装目录、`HBuilderX.exe` 或 `cli.exe`，Windows 路径建议使用 `/`，例如 `D:/Program Files/HBuilderX`
 - `privateKey`：优先读取 `MP_PRIVATE_KEY`，其次读取配置文件；项目根目录只有一个 `.key` 文件时自动使用
 - `appid`：读取 `manifest.json` 的 `mp-weixin.appid`
 - `version`：读取 `manifest.json` 的 `versionName`
