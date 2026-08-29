@@ -1,8 +1,8 @@
 {
   "name": "mp-review-cli",
-  "version": "1.7.1",
+  "version": "1.8.1",
   "private": true,
-  "description": "Submit the latest WeChat Mini Program development version for review through the official web console.",
+  "description": "Submit and release WeChat Mini Program versions through the official web console.",
   "type": "module",
   "bin": {
     "mp": "src/cli.js",

@@ -10,6 +10,7 @@ import { finishProgress, promptInput, showQr, startSpinner, updateProgress } fro
 const LOGIN_URL = 'https://mp.weixin.qq.com/'
 const VERSION_URL = token => `https://mp.weixin.qq.com/wxamp/wacodepage/getcodepage?token=${encodeURIComponent(token)}&lang=zh_CN`
 const LOGIN_TIMEOUT_MS = 5 * 60 * 1000
+const RELEASE_TIMEOUT_MS = 5 * 60 * 1000
 const PAGE_TIMEOUT_MS = 60 * 1000
 const POLL_INTERVAL_MS = 1000
 const DEFAULT_BROWSER_PATHS = [
@@ -92,6 +93,11 @@ function parseVersionNumber(text) {
   return text.match(/版本号\s*([0-9A-Za-z._-]+)/)?.[1] || '未知版本'
 }
 
+function parseReleaseField(text, label, nextLabels) {
+  const suffix = nextLabels.join('|')
+  return text.match(new RegExp(`${label}\\s*(.*?)\\s*(?=${suffix})`))?.[1]?.trim() || '未提供'
+}
+
 async function findToken(page) {
   const urlToken = new URL(page.url()).searchParams.get('token')
   if (urlToken)
@@ -156,6 +162,83 @@ export async function selectLatestDevelopmentVersion(page, expectedVersion) {
 
   eligibleCandidates.sort((left, right) => right.timestamp - left.timestamp)
   return eligibleCandidates[0]
+}
+
+export async function selectApprovedReleaseVersion(page) {
+  try {
+    await page.waitForFunction(() => {
+      const isVisible = (element) => {
+        const style = window.getComputedStyle(element)
+        return style.display !== 'none' && style.visibility !== 'hidden' && element.getClientRects().length > 0
+      }
+      return [...document.querySelectorAll('button, a, input[type="submit"], [role="button"], .btn_primary, .weui-desktop-btn')]
+        .some((element) => {
+          const text = (element.value || element.textContent || element.getAttribute('aria-label') || '')
+            .replace(/\s+/g, ' ')
+            .trim()
+          return isVisible(element) && text === '提交发布'
+        })
+    }, { timeout: PAGE_TIMEOUT_MS })
+  }
+  catch {
+    throw new Error('未找到审核通过待发布的版本')
+  }
+
+  const controls = await page.$$('button, a, input[type="submit"], [role="button"], .btn_primary, .weui-desktop-btn')
+  const candidates = []
+
+  for (const button of controls) {
+    const candidate = await button.evaluate((element) => {
+      const style = window.getComputedStyle(element)
+      const buttonText = (element.value || element.textContent || element.getAttribute('aria-label') || '')
+        .replace(/\s+/g, ' ')
+        .trim()
+      if (buttonText !== '提交发布'
+        || element.disabled === true
+        || element.getAttribute('aria-disabled') === 'true'
+        || element.classList.contains('weui-desktop-btn_disabled')
+        || element.classList.contains('btn_disabled')
+        || style.display === 'none'
+        || style.visibility === 'hidden'
+        || element.getClientRects().length === 0)
+        return null
+
+      const container = element.closest('.mod_default_box')
+      const text = (container?.textContent || '').replace(/\s+/g, ' ').trim()
+      return text.includes('审核版本') && text.includes('审核通过待发布') && text.includes('版本号') ? text : null
+    })
+
+    if (!candidate)
+      continue
+
+    candidates.push({
+      button,
+      auditNote: parseReleaseField(candidate, '审核说明', ['提交发布']),
+      developer: parseReleaseField(candidate, '开发者', ['提交审核时间', '审核说明', '审核通过待发布', '提交发布']),
+      submittedAt: parseReleaseField(candidate, '提交审核时间', ['审核说明', '审核通过待发布', '提交发布']),
+      text: candidate,
+      timestamp: parseSubmitTime(candidate),
+      version: parseVersionNumber(candidate),
+    })
+  }
+
+  if (candidates.length === 0)
+    throw new Error('未找到审核通过待发布的版本')
+
+  candidates.sort((left, right) => right.timestamp - left.timestamp)
+  return candidates[0]
+}
+
+function formatReleaseSummary(selectedVersion) {
+  const lines = [
+    '待发布版本信息：',
+    `版本号：${selectedVersion.version}`,
+    `开发者：${selectedVersion.developer}`,
+    `提交审核时间：${selectedVersion.submittedAt}`,
+  ]
+  if (selectedVersion.auditNote !== '未提供')
+    lines.push(`审核说明：${selectedVersion.auditNote}`)
+  return lines.join('\n')
 }
 
 async function clickVisibleButton(page, acceptedTexts, rootSelector = 'body') {
@@ -370,6 +453,126 @@ export async function submitAudit(page) {
   return true
 }
 
+async function showReleaseQr(page, projectName, selectedVersion) {
+  await page.waitForFunction(() => {
+    const isVisible = (element) => {
+      const style = window.getComputedStyle(element)
+      return style.display !== 'none' && style.visibility !== 'hidden' && element.getClientRects().length > 0
+    }
+    return [...document.querySelectorAll('.weui-desktop-dialog__wrp, .weui-desktop-dialog')]
+      .some(element => isVisible(element) && (element.textContent || '').includes('请使用微信扫描二维码进行验证'))
+  }, { timeout: PAGE_TIMEOUT_MS })
+
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const dialogs = await page.$$('.weui-desktop-dialog__wrp, .weui-desktop-dialog')
+    for (const dialog of dialogs) {
+      const visible = await dialog.evaluate((element) => {
+        const style = window.getComputedStyle(element)
+        return style.display !== 'none'
+          && style.visibility !== 'hidden'
+          && element.getClientRects().length > 0
+          && (element.textContent || '').includes('请使用微信扫描二维码进行验证')
+      })
+      if (!visible)
+        continue
+
+      const qrElements = await dialog.$$('img, canvas')
+      for (const element of [...qrElements, dialog]) {
+        const screenshot = await element.screenshot({ type: 'png' })
+        const png = PNG.sync.read(Buffer.from(screenshot))
+        const decoded = jsQR(new Uint8ClampedArray(png.data), png.width, png.height)
+        if (decoded?.data) {
+          const terminalQr = await renderTerminalQr(decoded.data)
+          const releaseSummary = formatReleaseSummary(selectedVersion)
+          showQr(projectName, '请再次使用微信扫描二维码验证发布', `${terminalQr.trimEnd()}\n${releaseSummary}`)
+          return
+        }
+      }
+    }
+    await sleep(500)
+  }
+
+  throw new Error('发布验证二维码识别失败，请使用 mp r --visible 扫描浏览器中的二维码')
+}
+
+export async function submitRelease(page, selectedVersion, { onVerificationRequired } = {}) {
+  await selectedVersion.button.click()
+  await page.waitForFunction(() => {
+    const isVisible = (element) => {
+      const style = window.getComputedStyle(element)
+      return style.display !== 'none' && style.visibility !== 'hidden' && element.getClientRects().length > 0
+    }
+    return [...document.querySelectorAll('.weui-desktop-dialog__wrp, .weui-desktop-dialog')]
+      .some((dialog) => {
+        if (!isVisible(dialog) || !(dialog.textContent || '').includes('发布线上版本'))
+          return false
+        return [...dialog.querySelectorAll('button, a, input[type="submit"], [role="button"], .btn_primary')]
+          .some((element) => {
+            const text = (element.value || element.textContent || element.getAttribute('aria-label') || '')
+              .replace(/\s+/g, ' ')
+              .trim()
+            return isVisible(element) && text === '提交'
+          })
+      })
+  }, { timeout: PAGE_TIMEOUT_MS })
+
+  const submitted = await page.evaluate(() => {
+    const isVisible = (element) => {
+      const style = window.getComputedStyle(element)
+      return style.display !== 'none' && style.visibility !== 'hidden' && element.getClientRects().length > 0
+    }
+    const dialogs = [...document.querySelectorAll('.weui-desktop-dialog__wrp, .weui-desktop-dialog')]
+      .filter(element => isVisible(element) && (element.textContent || '').includes('发布线上版本'))
+      .sort((left, right) => left.contains(right) ? 1 : right.contains(left) ? -1 : 0)
+
+    for (const dialog of dialogs) {
+      const button = [...dialog.querySelectorAll('button, a, input[type="submit"], [role="button"], .btn_primary')]
+        .find((element) => {
+          const text = (element.value || element.textContent || element.getAttribute('aria-label') || '')
+            .replace(/\s+/g, ' ')
+            .trim()
+          return isVisible(element) && text === '提交'
+        })
+      if (button instanceof HTMLElement) {
+        button.click()
+        return true
+      }
+    }
+    return false
+  })
+  if (!submitted)
+    throw new Error('未找到“发布线上版本”弹窗中的提交按钮')
+
+  await page.waitForFunction(() => document.body.innerText.includes('请使用微信扫描二维码进行验证'), {
+    timeout: PAGE_TIMEOUT_MS,
+  })
+  await onVerificationRequired?.(page)
+
+  await page.waitForFunction((version) => {
+    if (document.body.innerText.includes('发布成功'))
+      return true
+    const onlineVersion = document.querySelector('.mod_default_box.code_version_online, .code_version_online')
+    return Boolean(onlineVersion && (onlineVersion.textContent || '').includes(version))
+  }, { timeout: RELEASE_TIMEOUT_MS }, selectedVersion.version)
+  return true
+}
+
+async function openVersionManagementPage(browser, projectName) {
+  const loginPage = await browser.newPage()
+  await withSpinner(projectName, '正在打开微信公众平台', () => (
+    loginPage.goto(LOGIN_URL, { waitUntil: 'domcontentloaded', timeout: PAGE_TIMEOUT_MS })
+  ))
+  updateProgress(projectName, '正在获取微信登录二维码')
+  await showLoginQr(loginPage, projectName)
+
+  const authenticated = await waitForAuthenticatedPage(browser)
+  await authenticated.page.goto(VERSION_URL(authenticated.token), {
+    waitUntil: 'domcontentloaded',
+    timeout: PAGE_TIMEOUT_MS,
+  })
+  return authenticated.page
+}
+
 export async function runWechatReview({
   expectedVersion,
   inspectBeforeSubmit = false,
@@ -386,17 +589,8 @@ export async function runWechatReview({
   }))
 
   try {
-    const loginPage = await browser.newPage()
-    await withSpinner(projectName, '正在打开微信公众平台', () => (
-      loginPage.goto(LOGIN_URL, { waitUntil: 'domcontentloaded', timeout: PAGE_TIMEOUT_MS })
-    ))
-    updateProgress(projectName, '正在获取微信登录二维码')
-    await showLoginQr(loginPage, projectName)
-
-    const authenticated = await waitForAuthenticatedPage(browser)
-    const page = authenticated.page
+    const page = await openVersionManagementPage(browser, projectName)
     const selectedVersion = await withSpinner(projectName, '登录成功，正在读取开发版本', async () => {
-      await page.goto(VERSION_URL(authenticated.token), { waitUntil: 'domcontentloaded', timeout: PAGE_TIMEOUT_MS })
       return selectLatestDevelopmentVersion(page, expectedVersion)
     })
     const version = parseVersionNumber(selectedVersion.text)
@@ -422,6 +616,46 @@ export async function runWechatReview({
 
     await withSpinner(projectName, `正在自动确认并提交版本 ${version}`, () => submitAudit(auditPage))
     finishProgress(projectName, `版本 ${version} 提交审核成功`)
+  }
+  finally {
+    await browser.close()
+  }
+}
+
+export async function runWechatRelease({
+  inspectBeforeSubmit = false,
+  projectName = path.basename(process.cwd()),
+  visible = false,
+} = {}) {
+  const browser = await withSpinner(projectName, '准备打开微信公众平台并检查审核版本', () => puppeteer.launch({
+    executablePath: findBrowserPath(),
+    headless: !visible,
+    defaultViewport: { width: 1440, height: 900, deviceScaleFactor: 3 },
+  }))
+
+  try {
+    const page = await openVersionManagementPage(browser, projectName)
+    const selectedVersion = await withSpinner(projectName, '登录成功，正在检查审核通过的版本', () => (
+      selectApprovedReleaseVersion(page)
+    ))
+
+    if (inspectBeforeSubmit)
+      await page.bringToFront()
+
+    let stopReleaseSpinner = startSpinner(projectName, `正在自动提交发布版本 ${selectedVersion.version}`)
+    try {
+      await submitRelease(page, selectedVersion, {
+        onVerificationRequired: async (releasePage) => {
+          stopReleaseSpinner()
+          stopReleaseSpinner = null
+          await showReleaseQr(releasePage, projectName, selectedVersion)
+        },
+      })
+    }
+    finally {
+      stopReleaseSpinner?.()
+    }
+    finishProgress(projectName, `版本 ${selectedVersion.version} 发布成功`)
   }
   finally {
     await browser.close()

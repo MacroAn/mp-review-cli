@@ -3,25 +3,27 @@
 import process from 'node:process'
 import { getPublishConfig, printPublishConfig, runHBuilderPublish } from './hbuilder-publish.js'
 import { failProgress } from './progress.js'
-import { runWechatReview } from './wechat-review.js'
+import { runWechatRelease, runWechatReview } from './wechat-review.js'
 
-const VERSION = '1.7.1'
+const VERSION = '1.8.1'
 
 function printHelp() {
   console.log(`Usage: mp [command] [options]
 
 Commands:
-  review            Submit the latest uploaded development version (default)
-  config            Validate and display HBuilderX publishing configuration
-  full              Build and upload with HBuilderX, then submit that version
+  review            Submit the latest uploaded development version (default: mp)
+  release, r        Release the version that has passed review
+  config, c         Validate and display HBuilderX publishing configuration
+  full, f           Build and upload with HBuilderX, then submit that version
 
 Options:
-  --visible         Show Chrome and pause before final review submission
+  --visible         Show Chrome and pause before the final action
   -h, --help      Show help
   -v, --version   Show version
 
 The login QR code is displayed in the current terminal.
 Review mode requires an existing uploaded development version.
+Release mode requires a reviewed version marked ready for release.
 Full mode builds and uploads through the configured HBuilderX CLI.
 Review notices and final confirmation dialogs are accepted automatically.`)
 }
@@ -39,9 +41,15 @@ if (args.has('-v') || args.has('--version')) {
   process.exit(0)
 }
 
-const command = rawArgs.find(arg => !arg.startsWith('-')) || 'review'
-const supportedCommands = new Set(['review', 'config', 'full'])
-const supportedArgs = new Set(['-y', '--yes', '--visible', command])
+const commandAliases = new Map([
+  ['c', 'config'],
+  ['f', 'full'],
+  ['r', 'release'],
+])
+const rawCommand = rawArgs.find(arg => !arg.startsWith('-')) || 'review'
+const command = commandAliases.get(rawCommand) || rawCommand
+const supportedCommands = new Set(['review', 'release', 'config', 'full'])
+const supportedArgs = new Set(['-y', '--yes', '--visible', rawCommand])
 const unknownArgs = [...args].filter(arg => !supportedArgs.has(arg))
 if (unknownArgs.length > 0) {
   console.error(`Unknown option: ${unknownArgs.join(', ')}`)
@@ -59,6 +67,11 @@ const operation = async () => {
   const visible = args.has('--visible')
   if (command === 'review') {
     await runWechatReview({ inspectBeforeSubmit: visible, visible })
+    return
+  }
+
+  if (command === 'release') {
+    await runWechatRelease({ inspectBeforeSubmit: visible, visible })
     return
   }
 

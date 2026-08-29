@@ -5,8 +5,10 @@ import puppeteer from 'puppeteer-core'
 import {
   acceptReviewRules,
   fillReviewCredentials,
+  selectApprovedReleaseVersion,
   selectLatestDevelopmentVersion,
   submitAudit,
+  submitRelease,
   waitAndClickVisibleButton,
 } from '../src/wechat-review.js'
 
@@ -106,6 +108,91 @@ test('accepts the current review notice dialog and clicks next', async () => {
 
     assert.equal(await submitAudit(page), true)
     assert.match(await page.evaluate(() => document.body.innerText), /已提交审核/)
+  }
+  finally {
+    await browser.close()
+  }
+})
+
+test('releases only a reviewed version marked ready for release', async () => {
+  const executablePath = browserPaths.find(browserPath => fs.existsSync(browserPath))
+  assert.ok(executablePath, 'Chrome or Edge is required for this test')
+
+  const browser = await puppeteer.launch({ executablePath, headless: true })
+  try {
+    const page = await browser.newPage()
+    await page.setContent(`
+      <div class="mod_default_box code_version_online">
+        <h2>线上版本</h2>
+        <span>版本号 1.0.0</span>
+      </div>
+      <div class="mod_default_box">
+        <h2>审核版本</h2>
+        <div class="code_version_log">
+          <span>版本号 1.1.0</span>
+          <span>开发者 Macro2</span>
+          <span>提交审核时间 2026-08-29 10:25:38</span>
+          <span>审核通过待发布</span>
+          <span>审核说明 审核通过待发布</span>
+          <button id="release">提交发布</button>
+        </div>
+      </div>
+      <div class="weui-desktop-dialog__wrp" id="release-dialog" style="display: none">
+        <div class="weui-desktop-dialog">
+          <h4>发布线上版本</h4>
+          <label>发布模式 <select><option>全量发布</option></select></label>
+          <button>取消</button>
+          <button id="confirm-release">提交</button>
+        </div>
+      </div>
+      <div class="weui-desktop-dialog__wrp" id="verification-dialog" style="display: none">
+        <div class="weui-desktop-dialog">
+          <h4>发布版本</h4>
+          <div>请使用微信扫描二维码进行验证</div>
+        </div>
+      </div>
+      <script>
+        document.querySelector('#release').addEventListener('click', () => {
+          document.querySelector('#release-dialog').style.display = 'block'
+        })
+        document.querySelector('#confirm-release').addEventListener('click', () => {
+          document.querySelector('#release-dialog').style.display = 'none'
+          document.querySelector('#verification-dialog').style.display = 'block'
+        })
+      </script>
+    `)
+
+    const selectedVersion = await selectApprovedReleaseVersion(page)
+    assert.equal(selectedVersion.version, '1.1.0')
+    assert.equal(selectedVersion.developer, 'Macro2')
+    assert.equal(selectedVersion.submittedAt, '2026-08-29 10:25:38')
+    assert.equal(selectedVersion.auditNote, '审核通过待发布')
+    let verificationRequested = false
+    assert.equal(await submitRelease(page, selectedVersion, {
+      onVerificationRequired: async (releasePage) => {
+        verificationRequested = await releasePage.evaluate(() => (
+          document.body.innerText.includes('请使用微信扫描二维码进行验证')
+        ))
+        await releasePage.evaluate(() => {
+          document.querySelector('.code_version_online span').textContent = '版本号 1.1.0'
+          document.querySelector('#verification-dialog').style.display = 'none'
+          const result = document.createElement('div')
+          result.textContent = '发布成功'
+          document.body.appendChild(result)
+        })
+      },
+    }), true)
+    assert.equal(verificationRequested, true)
+    assert.match(await page.evaluate(() => document.body.innerText), /发布成功/)
+
+    await page.setContent(`
+      <div class="mod_default_box">
+        <h2>审核版本</h2>
+        <span>版本号 1.2.0 审核中</span>
+        <button>提交发布</button>
+      </div>
+    `)
+    await assert.rejects(selectApprovedReleaseVersion(page), /未找到审核通过待发布的版本/)
   }
   finally {
     await browser.close()

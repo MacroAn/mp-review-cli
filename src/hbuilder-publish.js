@@ -283,7 +283,7 @@ async function ensureHBuilderXReady(config) {
   if (existingProcessIds.length > 0) {
     throw new Error(
       `检测到普通方式启动且未连接 CLI 的 HBuilderX 进程（PID ${existingProcessIds.join(', ')}）。`
-      + '请保存工作并完全退出所有 HBuilderX 窗口，然后重新运行 mp full',
+      + '请保存工作并完全退出所有 HBuilderX 窗口，然后重新运行 mp f',
     )
   }
 
@@ -302,7 +302,7 @@ async function ensureHBuilderXReady(config) {
       return
   }
 
-  throw new Error('HBuilderX 未建立 CLI 连接。请保存工作并完全退出所有 HBuilderX 窗口，然后重新运行 mp full')
+  throw new Error('HBuilderX 未建立 CLI 连接。请保存工作并完全退出所有 HBuilderX 窗口，然后重新运行 mp f')
 }
 
 function encodePowerShellCommand(command) {
