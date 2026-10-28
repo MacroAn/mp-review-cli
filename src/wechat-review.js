@@ -667,6 +667,7 @@ async function openVersionManagementPage(browser, projectName) {
   await showLoginQr(loginPage, projectName)
 
   const authenticated = await withSpinner(projectName, '扫码后正在等待登录完成', () => waitForAuthenticatedPage(browser))
+  updateProgress(projectName, '登录成功，正在打开版本管理')
   await withSpinner(projectName, '登录成功，正在打开版本管理', () => openAuthenticatedVersionPage(authenticated.page, authenticated.token))
   return authenticated.page
 }

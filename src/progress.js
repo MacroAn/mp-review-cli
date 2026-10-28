@@ -75,6 +75,10 @@ function clearQr() {
 }
 
 export function startSpinner(projectName, step) {
+  // QR codes must remain on screen until an explicit progress update after scanning.
+  if (qrLineCount > 0)
+    return () => {}
+
   const frames = ['.', '..', '...']
   let frameIndex = 0
   updateProgress(projectName, step, frames[frameIndex])

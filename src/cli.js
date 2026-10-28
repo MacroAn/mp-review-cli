@@ -5,7 +5,7 @@ import { pathToFileURL } from 'node:url'
 import { failProgress, finishProgress, promptInput } from './progress.js'
 import { runWechatRelease, runWechatReview } from './wechat-review.js'
 
-const VERSION = '2.0.4'
+const VERSION = '2.0.5'
 
 export async function main(args = process.argv.slice(2), {
   prompt = promptInput,

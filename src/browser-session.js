@@ -32,14 +32,7 @@ export async function withBrowserSession(browser, projectName, operation, {
   write = message => process.stderr.write(message),
 } = {}) {
   try {
-    const result = await operation()
-    if (interactive) {
-      try {
-        await prompt(projectName, '执行成功，浏览器已保留。查看结果后按 Enter 关闭并退出：')
-      }
-      catch { /* Ctrl+C also closes this session. */ }
-    }
-    return result
+    return await operation()
   }
   catch (error) {
     report(`${error.step ? `${error.step}：` : ''}${safeMessage(error.message)}`)

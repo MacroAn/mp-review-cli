@@ -26,20 +26,11 @@ test('failure preserves the browser until the user acknowledges the error', asyn
   assert.equal(error.reported, true)
 })
 
-test('successful operation keeps the browser open until acknowledgement', async () => {
+test('successful operation closes automatically without asking for confirmation', async () => {
   let closed = false
-  let acknowledge
-  const acknowledgement = new Promise(resolve => { acknowledge = resolve })
-  let promptText
-  const result = withBrowserSession({ close: async () => { closed = true } }, 'test', async () => 42, {
-    interactive: true,
-    prompt: async (_project, text) => { promptText = text; await acknowledgement },
+  const value = await withBrowserSession({ close: async () => { closed = true } }, 'test', async () => 42, {
+    interactive: true, prompt: async () => assert.fail('success must not wait for confirmation'),
   })
-  await new Promise(resolve => setImmediate(resolve))
-  assert.match(promptText, /执行成功/)
-  assert.equal(closed, false)
-  acknowledge()
-  const value = await result
   assert.equal(value, 42)
   assert.equal(closed, true)
 })
