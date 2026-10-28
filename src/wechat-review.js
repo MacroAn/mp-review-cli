@@ -1,3 +1,5 @@
+import { withBrowserSession } from './browser-session.js'
+import { captureBrowserWindow, keepBrowserBehindTerminal } from './browser-window.js'
 import fs from 'node:fs'
 import path from 'node:path'
 import process from 'node:process'
@@ -26,6 +28,10 @@ async function withSpinner(projectName, step, operation) {
   const stopSpinner = startSpinner(projectName, step)
   try {
     return await operation()
+  }
+  catch (error) {
+    error.step ||= step
+    throw error
   }
   finally {
     stopSpinner()
@@ -131,7 +137,7 @@ async function waitForAuthenticatedPage(browser) {
   throw new Error('登录等待超时，请重新运行 mp 后在 5 分钟内扫码登录')
 }
 
-export async function selectLatestDevelopmentVersion(page, expectedVersion) {
+export async function selectLatestDevelopmentVersion(page) {
   const cardSelector = '.mod_default_box.code_version_dev .code_version_log'
   await page.waitForSelector(cardSelector, { timeout: PAGE_TIMEOUT_MS })
   const cards = await page.$$(cardSelector)
@@ -152,16 +158,10 @@ export async function selectLatestDevelopmentVersion(page, expectedVersion) {
   }
 
   if (candidates.length === 0)
-    throw new Error('未找到可提交审核的开发版本，请先在 HBuilderX 中上传代码')
+    throw new Error('未找到可提交审核的开发版本，请先上传小程序代码')
 
-  const eligibleCandidates = expectedVersion
-    ? candidates.filter(candidate => candidate.version === expectedVersion)
-    : candidates
-  if (eligibleCandidates.length === 0)
-    throw new Error(`微信公众平台未找到本次上传的版本 ${expectedVersion}`)
-
-  eligibleCandidates.sort((left, right) => right.timestamp - left.timestamp)
-  return eligibleCandidates[0]
+  candidates.sort((left, right) => right.timestamp - left.timestamp)
+  return candidates[0]
 }
 
 export async function selectApprovedReleaseVersion(page) {
@@ -344,6 +344,9 @@ async function setFormValue(element, value) {
 }
 
 export async function fillReviewCredentials(page, account, password) {
+  await page.waitForFunction(() => [...document.querySelectorAll('label, span, div')]
+    .some(element => (element.textContent || '').trim() === '需登录账号才可使用'),
+  { timeout: PAGE_TIMEOUT_MS })
   const selected = await page.evaluate(() => {
     const candidates = [...document.querySelectorAll('label, span, div')]
       .filter(element => (element.textContent || '').trim() === '需登录账号才可使用')
@@ -385,10 +388,47 @@ export async function fillReviewCredentials(page, account, password) {
   return notes
 }
 
+export async function assertReviewAvailable(page, selectedVersion, { timeout = 10000 } = {}) {
+  try {
+    await page.waitForFunction(element => element.isConnected
+      && !element.classList.contains('weui-desktop-btn_disabled')
+      && element.disabled !== true && element.getAttribute('aria-disabled') !== 'true',
+    { timeout }, selectedVersion.button)
+    return
+  }
+  catch (error) {
+    if (error.name !== 'TimeoutError')
+      throw error
+  }
+  const button = await selectedVersion.button.evaluate(element => ({
+    disabled: element.classList.contains('weui-desktop-btn_disabled')
+      || element.disabled === true || element.getAttribute('aria-disabled') === 'true',
+    hint: element.getAttribute('title') || element.getAttribute('data-tooltip') || '',
+  }))
+  if (!button.disabled)
+    return
+
+  const status = await page.evaluate(() => {
+    const isVisible = element => element.getClientRects().length > 0
+      && getComputedStyle(element).visibility !== 'hidden'
+    const cards = [...document.querySelectorAll('.mod_default_box')]
+      .filter(element => !element.classList.contains('code_version_dev')
+        && !element.classList.contains('code_version_online') && isVisible(element))
+    const audit = cards.find(element => (element.textContent || '').includes('审核版本'))
+    const text = audit?.textContent || ''
+    return ['审核通过待发布', '审核中', '审核不通过', '审核失败', '已撤回']
+      .find(value => text.includes(value)) || ''
+  })
+  const version = selectedVersion.version || parseVersionNumber(selectedVersion.text)
+  const detail = status ? `；后台审核状态：${status}` : '；未识别到明确的审核状态'
+  const advice = status === '审核中' ? '。请等待审核结果，无需重复提审'
+    : status === '审核通过待发布' ? '。若要上线已通过审核的版本，请退出后选择 2 发布'
+      : '。请查看浏览器版本管理页中的限制说明'
+  throw new Error(`开发版本 ${version} 的提交审核按钮已禁用${detail}${button.hint ? `；按钮提示：${button.hint}` : ''}${advice}`)
+}
+
 async function openAuditForm(browser, page, selectedVersion) {
-  const disabled = await selectedVersion.button.evaluate(element => element.classList.contains('weui-desktop-btn_disabled'))
-  if (disabled)
-    throw new Error('最新开发版本的提交审核按钮不可用，请先处理当前审核中的版本')
+  await assertReviewAvailable(page, selectedVersion)
 
   await selectedVersion.button.click()
   await acceptReviewRules(page)
@@ -492,7 +532,7 @@ async function showReleaseQr(page, projectName, selectedVersion) {
     await sleep(500)
   }
 
-  throw new Error('发布验证二维码识别失败，请使用 mp r --visible 扫描浏览器中的二维码')
+  throw new Error('发布验证二维码识别失败，请重新运行 mp 并选择 2 发布')
 }
 
 export async function submitRelease(page, selectedVersion, { onVerificationRequired } = {}) {
@@ -557,6 +597,67 @@ export async function submitRelease(page, selectedVersion, { onVerificationRequi
   return true
 }
 
+export async function openAuthenticatedVersionPage(page, token, { retryDelay = 500 } = {}) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      await page.goto(VERSION_URL(token), { waitUntil: 'domcontentloaded', timeout: PAGE_TIMEOUT_MS })
+      await page.waitForFunction(() => location.pathname.includes('/wxamp/wacodepage/getcodepage')
+        && document.readyState !== 'loading', { timeout: PAGE_TIMEOUT_MS })
+      return
+    }
+    catch (error) {
+      if (attempt === 2 || !/ERR_ABORTED|Execution context was destroyed|frame was detached|Navigating frame was detached/i.test(error.message))
+        throw error
+      await sleep(retryDelay)
+    }
+  }
+}
+
+export async function confirmSubmittedReview(page, token, version, { attempts = 3, timeout = 15000 } = {}) {
+  try {
+    if (!token)
+      throw new Error('未能获取版本管理页地址')
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      await openAuthenticatedVersionPage(page, token)
+      try {
+        const handle = await page.waitForFunction((expected) => {
+          const cards = [...document.querySelectorAll('.mod_default_box')]
+            .filter(element => element.getClientRects().length > 0
+              && getComputedStyle(element).visibility !== 'hidden'
+              && !element.classList.contains('code_version_dev')
+              && !element.classList.contains('code_version_online'))
+          for (const card of cards) {
+            const text = (card.textContent || '').replace(/\s+/g, ' ').trim()
+            if (!text.includes('审核版本'))
+              continue
+            const actual = text.match(/版本号\s*([0-9A-Za-z._-]+)/)?.[1]
+            if (actual !== expected)
+              continue
+            return { version: actual, status: ['审核通过待发布', '审核中', '审核不通过', '审核失败', '已撤回', '审核通过']
+              .find(value => text.includes(value)) || '状态未显示' }
+          }
+          return false
+        }, { timeout, polling: 500 }, version)
+        try {
+          const result = await handle.jsonValue()
+          if (['审核不通过', '审核失败', '已撤回'].includes(result.status))
+            throw new Error(`已找到版本 ${version}，但后台状态为${result.status}`)
+          return result
+        }
+        finally { await handle.dispose() }
+      }
+      catch (error) {
+        if (error.name !== 'TimeoutError')
+          throw error
+      }
+    }
+    throw new Error(`审核版本中未找到本次版本 ${version}`)
+  }
+  catch (error) {
+    throw new Error(`已执行提交，但结果尚未确认：${error.message}。请查看版本管理页，确认后再决定是否重试，避免重复提审`, { cause: error })
+  }
+}
+
 async function openVersionManagementPage(browser, projectName) {
   const loginPage = await browser.newPage()
   await withSpinner(projectName, '正在打开微信公众平台', () => (
@@ -565,39 +666,40 @@ async function openVersionManagementPage(browser, projectName) {
   updateProgress(projectName, '正在获取微信登录二维码')
   await showLoginQr(loginPage, projectName)
 
-  const authenticated = await waitForAuthenticatedPage(browser)
-  await authenticated.page.goto(VERSION_URL(authenticated.token), {
-    waitUntil: 'domcontentloaded',
-    timeout: PAGE_TIMEOUT_MS,
-  })
+  const authenticated = await withSpinner(projectName, '扫码后正在等待登录完成', () => waitForAuthenticatedPage(browser))
+  await withSpinner(projectName, '登录成功，正在打开版本管理', () => openAuthenticatedVersionPage(authenticated.page, authenticated.token))
   return authenticated.page
 }
 
-export async function runWechatReview({
-  expectedVersion,
-  inspectBeforeSubmit = false,
-  projectName = path.basename(process.cwd()),
-  visible = false,
-} = {}) {
-  const startMessage = expectedVersion
-    ? `准备提审 HBuilderX 已上传版本 ${expectedVersion}`
-    : '准备打开微信公众平台（不会上传代码）'
-  const browser = await withSpinner(projectName, startMessage, () => puppeteer.launch({
+async function launchVisibleBrowser() {
+  const geometry = captureBrowserWindow()
+  const browser = await puppeteer.launch({
     executablePath: findBrowserPath(),
-    headless: !visible,
-    defaultViewport: { width: 1440, height: 900, deviceScaleFactor: 3 },
-  }))
+    headless: false,
+    defaultViewport: null,
+    args: [
+      '--window-size=' + geometry.width + ',' + geometry.height,
+      '--window-position=' + geometry.left + ',' + geometry.top,
+    ],
+  })
+  const stopWindowManager = keepBrowserBehindTerminal(browser, geometry)
+  browser.once('disconnected', stopWindowManager)
+  return browser
+}
 
-  try {
+export async function runWechatReview() {
+  const projectName = path.basename(process.cwd())
+  const browser = await withSpinner(projectName, '准备打开微信公众平台', launchVisibleBrowser)
+
+  return withBrowserSession(browser, projectName, async () => {
     const page = await openVersionManagementPage(browser, projectName)
     const selectedVersion = await withSpinner(projectName, '登录成功，正在读取开发版本', async () => {
-      return selectLatestDevelopmentVersion(page, expectedVersion)
+      return selectLatestDevelopmentVersion(page)
     })
     const version = parseVersionNumber(selectedVersion.text)
     const auditPage = await withSpinner(projectName, `已选择开发版本 ${version}，正在打开审核资料`, () => (
       openAuditForm(browser, page, selectedVersion)
     ))
-    await auditPage.bringToFront()
 
     const account = (await promptInput(projectName, '请输入审核测试账号：')).trim()
     if (!account)
@@ -609,38 +711,25 @@ export async function runWechatReview({
       fillReviewCredentials(auditPage, account, password)
     ))
 
-    if (inspectBeforeSubmit) {
-      await auditPage.bringToFront()
-      await promptInput(projectName, '请检查浏览器中的审核信息，确认后按 Enter 继续：')
-    }
-
+    const token = await findToken(page)
     await withSpinner(projectName, `正在自动确认并提交版本 ${version}`, () => submitAudit(auditPage))
-    finishProgress(projectName, `版本 ${version} 提交审核成功`)
-  }
-  finally {
-    await browser.close()
-  }
+    const result = await withSpinner(projectName, `已执行提交，正在返回版本管理核对 ${version}`, () => (
+      confirmSubmittedReview(auditPage, token, version)
+    ))
+    finishProgress(projectName, `版本 ${version} 提交审核成功，已在审核版本中确认（${result.status}）`)
+  })
 }
 
-export async function runWechatRelease({
-  inspectBeforeSubmit = false,
-  projectName = path.basename(process.cwd()),
-  visible = false,
-} = {}) {
-  const browser = await withSpinner(projectName, '准备打开微信公众平台并检查审核版本', () => puppeteer.launch({
-    executablePath: findBrowserPath(),
-    headless: !visible,
-    defaultViewport: { width: 1440, height: 900, deviceScaleFactor: 3 },
-  }))
+export async function runWechatRelease() {
+  const projectName = path.basename(process.cwd())
+  const browser = await withSpinner(projectName, '准备打开微信公众平台并检查审核版本', launchVisibleBrowser)
 
-  try {
+  return withBrowserSession(browser, projectName, async () => {
     const page = await openVersionManagementPage(browser, projectName)
     const selectedVersion = await withSpinner(projectName, '登录成功，正在检查审核通过的版本', () => (
       selectApprovedReleaseVersion(page)
     ))
 
-    if (inspectBeforeSubmit)
-      await page.bringToFront()
 
     let stopReleaseSpinner = startSpinner(projectName, `正在自动提交发布版本 ${selectedVersion.version}`)
     try {
@@ -656,8 +745,5 @@ export async function runWechatRelease({
       stopReleaseSpinner?.()
     }
     finishProgress(projectName, `版本 ${selectedVersion.version} 发布成功`)
-  }
-  finally {
-    await browser.close()
-  }
+  })
 }

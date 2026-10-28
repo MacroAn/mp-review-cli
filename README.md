@@ -1,168 +1,36 @@
 # mp-review-cli
 
-在 Windows 命令行中自动发行、上传并提交微信小程序审核。
-
-`mp-review-cli` 使用无头 Chrome/Edge 操作微信公众平台：在终端显示登录二维码，扫码后可以提交最新开发版本审核，或发布审核通过的版本。
-
-> `mp` 保持原有行为，只提交微信公众平台中已经上传的开发版本；`mp f` 才会调用 HBuilderX CLI 编译上传，并在上传成功后提审同一版本。原有长命令继续兼容。
-
-## 功能
-
-- 在当前 CMD/PowerShell 中显示微信登录二维码
-- 自动读取微信公众平台开发版本
-- 按提交时间选择最新开发版本
-- 自动勾选并通过审核须知
-- 自动点击最终提交审核
-- 自动处理微信可能出现的隐私二次确认
-- 自动识别并发布状态为“审核通过待发布”的审核版本
-- 固定两行显示“当前项目”和“当前步骤”，上传和提审等待阶段显示 `.`、`..`、`...` 加载动画
-- 自动选择“需登录账号才可使用”，并交互式填写审核测试账号、密码和备注
-- 支持 CMD、Windows PowerShell 和 PowerShell 7
-- 提供 `mp`、`mp.cmd` 和 `wxmp` 命令
-- 提供一键安装 BAT 脚本
-- 可调用 HBuilderX CLI 编译并上传 uni-app 微信小程序
-- 自动读取 `manifest.json` 的微信 AppID 和版本号
-- 上传成功后按版本号约束提审目标，避免误提审旧版本
-- 支持项目级 HBuilderX 路径、上传密钥、CI 机器人等配置
-
-## 执行流程
-
-```text
-mp（仅提审）
-  -> 读取微信公众平台最新开发版本
-  -> 终端扫码登录
-  -> 自动提交审核
-
-mp f（完整流程，兼容 mp full）
-  -> 读取 manifest.json 和 .mp-review.json
-  -> HBuilderX CLI 编译 mp-weixin
-  -> 上传代码到微信公众平台
-  -> 终端扫码登录
-  -> 校验并选择本次上传的版本号
-  -> 自动提交审核
-
-mp r（发布审核通过的版本，兼容 mp release）
-  -> 终端扫码登录
-  -> 校验审核版本状态为“审核通过待发布”
-  -> 选择默认的全量发布并提交
-  -> 终端再次显示二维码及待发布版本信息
-  -> 扫码验证发布
-```
-
-## 环境要求
-
-- Windows 10/11
-- Node.js 20 或更高版本
-- npm
-- Google Chrome 或 Microsoft Edge
-- 微信公众平台账号具有目标小程序的版本管理权限
-- 建议目标小程序至少手工提审过一次，使平台保存类目、审核页面等资料
-- 仅使用 `mp` 时，微信公众平台必须已经存在可提审的开发版本
-- 使用 `mp f` 时，需要 HBuilderX 3.3.7+ 和微信代码上传密钥
-- 使用 `robot` 参数需要 HBuilderX 3.6.18+ 及新版微信小程序上传 CI 插件
-- uni-app 项目需要已经导入当前机器的 HBuilderX 项目管理器
-
-## 安装
-
-### 一键安装
-
-下载或克隆项目后，双击：
-
-```text
-install.bat
-```
-
-安装脚本会：
-
-1. 检查 Node.js 和 npm
-2. 安装项目依赖
-3. 将 `mp` 和 `wxmp` 安装到当前 Windows 用户
-4. 将 `%APPDATA%\npm` 加入用户 PATH（如果尚未加入）
-5. 配置 Windows PowerShell 和 PowerShell 7 的 `mp` 命令
-6. 验证安装版本
-
-安装完成后，请重新打开终端。
-
-### 手工安装
-
-在项目目录运行：
-
-```cmd
-npm install
-npm install -g --prefix "%APPDATA%\npm" --install-links=true .
-```
-
-手工安装不会自动处理 PowerShell 的 `mp` 别名冲突，PowerShell 中可使用 `mp.cmd` 或 `wxmp`。
+通过可见的 Chrome/Edge 自动提交微信小程序审核、发布审核通过的版本。浏览器展示执行过程，所有文字输入和操作选择在终端完成；微信身份验证使用手机扫码。
 
 ## 使用
 
-### 仅提交审核
+运行：
 
-先通过 HBuilderX 或微信开发者工具上传开发版本，然后运行：
-
-```cmd
+```text
 mp
 ```
 
-终端会显示微信登录二维码。扫码并在微信中选择目标小程序后，程序将直接执行真实提审。
+终端提示：
 
-原有 `mp review` 命令继续兼容。
-
-```cmd
-mp
+```text
+1 提审 / 2 发布 / 0 退出，请输入：
 ```
 
-### 检查 HBuilderX 发行配置
+输入数字并回车即可。输入无效时重新选择，Ctrl+C 取消输入。每次运行只执行一次所选操作。
 
-在 uni-app 项目目录运行：
+- **1 提审**：扫码登录并选择目标小程序，按提交时间选择最新开发版本；在终端输入审核测试账号和密码后，自动填写资料并提交审核。
+- **2 发布**：扫码登录并选择目标小程序，查找“审核通过待发布”的版本，按页面默认发布模式自动提交；终端展示发布验证二维码及版本信息，再次扫码验证后完成发布。
+- **0 退出**：关闭菜单，不打开浏览器。
 
-```cmd
-mp c
-```
+浏览器铺满命令窗口所在屏幕的可用宽度和高度，保留任务栏；命令窗口保持在浏览器前面，页面切换时自动恢复命令窗口焦点。切换到其他应用时不会主动抢回焦点。
 
-该命令只读取并校验配置，不启动 HBuilderX、不上传代码，也不提审。它会显示解析后的项目目录、HBuilderX CLI、项目名、AppID、版本号、上传描述、密钥路径和 CI 机器人编号。
+浏览器始终可见，无需在网页中点击按钮或输入账号。二维码在终端显示，也可从浏览器查看。提交审核后自动返回版本管理页，最多刷新核对三次；仅当“审核版本”中出现本次准确版本号时才显示提交成功，未确认时提示人工核对，不自动重复提交。成功后终端保留明确结果和提示，浏览器保留在结果页，按 Enter 才关闭。执行失败时，终端显示错误步骤和日志路径，浏览器保留到你在终端按 Enter 后才关闭；启动失败也会等待按 Enter 退出。日志保存到 LocalAppData/mp-review-cli/logs，记录错误、步骤和不含查询参数的页面地址，不采集页面截图或表单内容。登录状态不持久保存。
 
-### 发布审核通过的版本
+本工具只保留提审、发布功能。小程序代码需要提前通过其他工具上传。不再支持 full/f、config/c、review、release/r、--visible、--yes 等旧参数；帮助和版本可用 mp --help、mp --version 查看。
 
-确认微信公众平台的审核版本已显示“审核通过待发布”，然后运行：
+## 提审资料
 
-```cmd
-mp r
-```
-
-程序会先扫码登录并匹配审核通过的版本，自动点击“提交发布”，保留默认的“全量发布”并提交。随后终端会显示第二个二维码，并在二维码下方显示版本号、开发者、提交审核时间和审核说明；再次使用微信扫码验证后才会完成发布。若需要同时查看后台页面，可运行：
-
-```cmd
-mp r --visible
-```
-
-可视化模式会同时显示版本管理页面，最终仍通过第二次扫码确认发布。
-
-### 完整发行、上传和提审
-
-```cmd
-mp f
-```
-
-`mp f` 会执行真实的 HBuilderX 编译上传和微信提审，并且不要求二次输入确认。HBuilderX 返回非零退出码时，流程会立即停止，不会进入提审。
-
-需要查看自动填写结果时，使用可视化调试模式：
-
-```cmd
-mp f --visible
-```
-
-该模式会显示 Chrome，在填写测试账号、密码和测试备注后滚动到对应区域，并暂停在最终提交之前。检查或手工修改完成后，在终端按 Enter 才继续提交。普通 `mp f` 仍保持无头、全自动、不暂停。
-
-仅检查已经上传的开发版本时也可以使用：
-
-```cmd
-mp --visible
-```
-
-执行时第一行固定显示当前项目，第二行实时覆盖当前步骤；HBuilderX 编译上传和微信提审等待期间循环显示 `.`、`..`、`...` 加载动画。二维码从第三行开始显示，扫码登录成功后自动清除二维码区域，并继续在第二行更新进度。扫码和终端输入期间动画会暂停，避免刷新二维码或输入内容。`mp f` 默认隐藏 HBuilderX 的编译、warning、上传调试和 PowerShell 内部日志；运行 `mp c` 时仍会显示完整配置，失败时第二行会保留错误。
-
-进入新版微信审核资料页面后，程序会选择“需登录账号才可使用”，并在终端第二行要求输入测试账号和测试密码。密码使用 `*` 遮挡且不会写入本地配置或日志。随后自动填写：
+程序自动选择“需登录账号才可使用”，测试密码在终端以星号显示，不写入本地配置。审核备注自动填写：
 
 ```text
 线上真实生产环境,请手下留情
@@ -170,204 +38,36 @@ mp --visible
 测试密码: 用户输入的密码
 ```
 
-这些内容会提交给微信审核人员，请务必使用专门的审核测试账号，不要使用员工、管理员或生产用户的真实密码。
+普通执行会自动接受审核须知、最终提交及可能出现的隐私二次确认。请提前在微信后台维护类目、审核页面及隐私资料，并提供专门的审核测试账号。
 
-### 配置文件
+## 安装与环境
 
-在 uni-app 项目根目录创建 `.mp-review.json`。可以复制本仓库的 `.mp-review.example.json`：
+需要 Windows 10/11、Node.js 20+、npm，以及本机 Chrome 或 Edge。微信账号需要对应小程序的版本管理权限。
 
-```json5
-{
-  // 可填写 HBuilderX 安装目录、HBuilderX.exe 或 cli.exe
-  "hbuilderCli": "D:/HBuilderX",
+双击 install.bat 安装依赖、全局命令并处理 PowerShell 的 mp 别名冲突。安装或更新后重新打开终端。PowerShell 备用入口为 mp.cmd、wxmp，执行同一个菜单。
 
-  // 相对路径以当前 uni-app 项目根目录为基准
-  "privateKey": "./private.wx-appid.key",
+也可在仓库目录运行 npm install 后，用 node src/cli.js 启动。通过环境变量 MP_BROWSER_PATH 可指定浏览器可执行文件路径。
 
-  // 以下配置均为可选
-  "project": "my-uni-app-project",
-  "robot": 1,
-  "sourceMap": false,
-  "subPackage": "hybrid-package",
-  "description": "本次上传说明"
-}
-```
+窗口管理直接调用 Windows 原生辅助程序，首次运行会使用系统 .NET Framework 编译器生成并缓存到当前用户的 LocalAppData/mp-review-cli/window-helper 目录。运行时不调用 PowerShell；窗口管理不可用时仍继续打开可见浏览器。
 
-默认值和自动发现规则：
+## 实现与限制
 
-- `hbuilderCli`：优先读取环境变量 `HBUILDERX_CLI`/`MP_HBUILDER_CLI`，其次读取配置文件，再检查常见安装路径；可填写安装目录、`HBuilderX.exe` 或 `cli.exe`，Windows 路径建议使用 `/`，例如 `D:/Program Files/HBuilderX`
-- `privateKey`：优先读取 `MP_PRIVATE_KEY`，其次读取配置文件；项目根目录只有一个 `.key` 文件时自动使用
-- `appid`：读取 `manifest.json` 的 `mp-weixin.appid`
-- `version`：读取 `manifest.json` 的 `versionName`
-- `project`：默认使用项目目录名
-- `description`：优先读取 `MP_DESCRIPTION` 或配置文件，否则使用最近一次 Git 提交说明
-- `robot`：默认为 `1`，有效范围为 1 到 30
-- `sourceMap`：默认为 `false`
+- src/cli.js：终端菜单及命令入口。
+- src/wechat-review.js：Puppeteer 操作微信公众平台网页、识别二维码、自动提审及发布。
+- src/progress.js：终端进度、二维码及账号密码输入。
+- install.bat、configure-powershell.ps1：Windows 用户安装及命令配置。
 
-`.mp-review.json` 通常包含当前机器路径，建议将它加入业务项目的 `.gitignore`。微信上传密钥本身也不得提交到 Git 仓库。
-
-查看帮助和版本：
-
-```cmd
-mp --help
-mp --version
-```
-
-## PowerShell 的 mp 冲突
-
-PowerShell 内置了以下只读别名：
-
-```powershell
-mp -> Move-ItemProperty
-```
-
-`install.bat` 会在当前用户的 Windows PowerShell 和 PowerShell 7 Profile 中加入带边界标记的配置，移除该别名并将 `mp` 映射到本工具。安装后需要重新打开 PowerShell。
-
-如果 Profile 被执行策略禁用，可直接使用：
-
-```powershell
-mp.cmd
-```
-
-或者使用无冲突的备用命令：
-
-```powershell
-wxmp
-```
-
-## 自动化与风险
-
-运行 `mp` 会产生真实的微信小程序提审操作，运行 `mp r` 会产生真实的线上版本发布操作；普通模式不会在最终操作前要求输入确认。
-
-程序还会自动接受微信可能出现的隐私二次确认。如果小程序的隐私保护指引与实际调用的隐私接口不一致，相关接口权限可能受到影响。使用前应在微信公众平台确认：
-
-- 服务类目正确
-- 审核页面正确
-- 测试账号及说明完整
-- 用户隐私保护指引正确
-- 代码中使用的隐私接口已经声明并获得权限
-
-建议先在非关键小程序或可撤回的开发版本上验证完整流程。
-
-## 安全说明
-
-- 项目不包含微信 AppSecret、代码上传密钥或固定 Access Token
-- 微信登录二维码为临时凭证，请勿截图传播
-- 浏览器会在命令结束后关闭，不持久化登录状态
-- 不要把微信代码上传密钥、Cookie 或登录缓存提交到公开仓库
-- 小程序 AppID 通常不是秘密，但私钥和 AppSecret 必须保密
-
-## 常见问题
-
-### 运行 mp 后出现 Move-ItemProperty 参数提示
-
-当前终端仍在使用 PowerShell 内置别名。重新运行 `install.bat` 并打开新的 PowerShell，或者执行：
-
-```powershell
-mp.cmd
-```
-
-也可以执行：
-
-```powershell
-wxmp
-```
-
-### 未找到可提交审核的开发版本
-
-先在 HBuilderX 或微信开发者工具中上传代码，确认微信公众平台的版本管理页面存在开发版本。
-
-### 未找到审核通过待发布的版本
-
-确认审核版本已通过审核，并且版本管理页面显示“审核通过待发布”和“提交发布”。审核中、审核失败或已经发布的版本不会被选择。
-
-### HBuilderX CLI 或上传密钥不存在
-
-在业务项目根目录创建 `.mp-review.json`，配置当前机器的 `hbuilderCli` 和 `privateKey`，然后运行 `mp c` 检查。路径中包含反斜杠时，JSON 字符串需要写成双反斜杠。
-
-### HBuilderX 提示找不到项目
-
-先在当前机器的 HBuilderX 中导入并打开 uni-app 项目。`.mp-review.json` 的 `project` 必须与 HBuilderX 项目管理器中显示的项目名称一致。
-
-### 未检测到已打开的 HBuilderX
-
-官方文档只要求通过 `cli open` 启动 HBuilderX，并没有要求日常使用时必须关闭 HBuilderX。参见 [HBuilderX CLI 概述](https://hx.dcloud.net.cn/cli/README)。
-
-如果 HBuilderX 被配置为“以管理员身份运行”，普通权限的 CLI 无法直接与它建立连接。此时仍然在普通 CMD/PowerShell 中运行 `mp f`：工具会弹出一次 Windows UAC，只让 HBuilderX 编译上传辅助进程获得管理员权限；上传结束后回到原来的普通终端显示二维码并继续提审。无需关闭 HBuilderX，也不建议为了二维码在管理员终端中运行整段流程。
-
-权限一致但仍未连接时，可能是普通方式启动的旧 HBuilderX 实例没有 CLI 通道。保存文件并完全退出所有 HBuilderX 窗口后重新运行 `mp f`，工具会通过官方 `cli open` 启动。工具不会强制关闭 HBuilderX，以免丢失未保存内容。
-
-### 未找到最终提交审核按钮
-
-可能原因：
-
-- 审核资料页面仍在加载
-- 必填审核资料不完整
-- 当前已有审核中的版本
-- 微信公众平台页面结构已经更新
-
-当前实现会等待最终按钮出现；如果仍然失败，请提供终端错误和页面截图。
-
-### 登录二维码识别失败
-
-重新运行 `mp` 获取新二维码，并确认网络可以访问 `mp.weixin.qq.com`。二维码具有时效性，过期后不能继续使用。
+依赖微信后台网页结构，页面改版可能需要调整。每次运行都需要扫码登录；发布只检查当前审核状态，不会等待审核通过。工具不会编译、上传代码或修改业务项目配置。
 
 ## 开发
 
-安装依赖：
-
-```cmd
-npm install
-```
-
-执行测试、语法检查和依赖审计：
-
-```cmd
+```text
 npm test
 npm run check
-npm audit --omit=dev
 ```
 
-项目结构：
-
-```text
-mp-review-cli/
-|-- src/
-|   |-- cli.js
-|   |-- hbuilder-publish.js
-|   |-- progress.js
-|   `-- wechat-review.js
-|-- test/
-|   |-- hbuilder-publish.test.js
-|   `-- review-dialog.test.js
-|-- .mp-review.example.json
-|-- configure-powershell.ps1
-|-- install.bat
-|-- LICENSE
-|-- package.json
-`-- README.md
-```
-
-## 当前限制
-
-- 依赖微信公众平台网页结构，不是微信官方提审 API
-- 微信后台改版后可能需要更新页面选择器
-- 每次运行需要扫码登录
-- `mp r` 只执行一次状态检查，不会常驻等待审核结果
-- HBuilderX CLI 发行目前仅面向 Windows 的 uni-app/uni-app x `mp-weixin`
-- `mp f` 依赖 HBuilderX 已正确安装、项目已导入且微信上传 CI 插件可用
-- 仅使用 `mp` 时仍然按提交时间选择最新开发版本，无法对应某次指定的本地构建
-
-## 路线图
-
-- 增加失败页面诊断和可选截图
-- 支持可选的扫码登录状态缓存
-- 支持更多 HBuilderX 发行平台和非 Windows 环境
-
-## 免责声明
-
-本项目不是微信或 DCloud 官方工具。使用者应自行确认微信公众平台规则、审核资料和隐私声明。因自动提审、平台页面变化、账号权限或错误配置产生的影响，由使用者自行承担。
+浏览器测试使用本地模拟页面，不会连接微信或执行真实提审、发布。
 
 ## License
 
-本项目使用 [MIT License](LICENSE)。
+MIT。非微信官方工具。

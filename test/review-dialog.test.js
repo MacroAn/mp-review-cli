@@ -4,6 +4,8 @@ import test from 'node:test'
 import puppeteer from 'puppeteer-core'
 import {
   acceptReviewRules,
+  assertReviewAvailable,
+  confirmSubmittedReview,
   fillReviewCredentials,
   selectApprovedReleaseVersion,
   selectLatestDevelopmentVersion,
@@ -30,12 +32,8 @@ test('accepts the current review notice dialog and clicks next', async () => {
         <div class="code_version_log">版本号 2.0.0 提交时间 2026-08-26 11:00:00 <button class="weui-desktop-btn weui-desktop-btn_primary">提交审核</button></div>
       </div>
     `)
-    const selectedVersion = await selectLatestDevelopmentVersion(page, '1.0.0')
-    assert.equal(selectedVersion.version, '1.0.0')
-    await assert.rejects(
-      selectLatestDevelopmentVersion(page, '3.0.0'),
-      /未找到本次上传的版本 3.0.0/,
-    )
+    const selectedVersion = await selectLatestDevelopmentVersion(page)
+    assert.equal(selectedVersion.version, '2.0.0')
 
     await page.setContent(`
       <div class="weui-desktop-dialog__wrp">
@@ -62,13 +60,15 @@ test('accepts the current review notice dialog and clicks next', async () => {
     assert.equal(await page.evaluate(() => document.body.dataset.nextClicked), 'true')
 
     await page.setContent(`
-      <label id="login-required"><input type="radio" name="login">需登录账号才可使用</label>
+      <div id="loading">正在加载审核资料</div>
+      <label id="login-required"><input type="radio" name="login">加载中</label>
       <div id="credentials" style="display: none">
         <input placeholder="请填写提供用于审核测试使用的测试账号">
         <input placeholder="请填写测试账号的登录密码">
         <textarea placeholder="若测试流程特殊，请描述测试流程以便审核人员进行审核"></textarea>
       </div>
       <script>
+        setTimeout(() => { document.querySelector('#login-required').lastChild.textContent = '需登录账号才可使用' }, 300)
         document.querySelector('#login-required').addEventListener('click', () => {
           document.querySelector('#credentials').style.display = 'block'
         })
@@ -197,4 +197,71 @@ test('releases only a reviewed version marked ready for release', async () => {
   finally {
     await browser.close()
   }
+})
+
+
+test('disabled review buttons report observed status without assuming an audit is in progress', async () => {
+  const executablePath = browserPaths.find(p => fs.existsSync(p))
+  const browser = await puppeteer.launch({ executablePath, headless: true })
+  try {
+    const page = await browser.newPage()
+    for (const [status, expected] of [
+      ['审核中', /后台审核状态：审核中.*无需重复提审/],
+      ['审核通过待发布', /后台审核状态：审核通过待发布.*选择 2 发布/],
+      ['', /未识别到明确的审核状态/],
+    ]) {
+      await page.setContent('<div class="mod_default_box"><h2>审核版本</h2>' + status + '</div><button class="weui-desktop-btn_disabled" title="平台暂不允许提交">提交审核</button>')
+      const button = await page.$('button')
+      await assert.rejects(assertReviewAvailable(page, { button, version: '1.0.5' }, { timeout: 100 }), expected)
+    }
+    await page.setContent('<button>提交审核</button>')
+    await assert.doesNotReject(assertReviewAvailable(page, { button: await page.$('button'), version: '1.0.5' }))
+  }
+  finally { await browser.close() }
+})
+
+
+test('review verification matches the audit card exactly and refreshes before reporting success', async () => {
+  const executablePath = browserPaths.find(p => fs.existsSync(p))
+  const browser = await puppeteer.launch({ executablePath, headless: true })
+  try {
+    const page = await browser.newPage()
+    await page.setRequestInterception(true)
+    let visits = 0
+    let audit = ''
+    let nextAudit = ''
+    page.on('request', request => {
+      if (!request.isNavigationRequest()) {
+        request.respond({ status: 204, body: '' })
+        return
+      }
+      visits++
+      const currentAudit = visits === 1 ? audit : nextAudit
+      request.respond({ contentType: 'text/html; charset=utf-8', body:
+        '<div class="mod_default_box code_version_online">线上版本 版本号 1.0.5</div>' +
+        '<div class="mod_default_box"><h2>审核版本</h2>' + currentAudit + '</div>' +
+        '<div class="mod_default_box code_version_dev">开发版本 版本号 1.0.5</div>' })
+    })
+    // An identical development/online version and a prefix match in the audit card are insufficient.
+    audit = '版本号 1.0.50 审核中'
+    nextAudit = '版本号 1.0.5 审核中'
+    const result = await confirmSubmittedReview(page, 'test', '1.0.5', { attempts: 2, timeout: 200 })
+    assert.deepEqual(result, { version: '1.0.5', status: '审核中' })
+    assert.equal(visits, 2)
+    assert.match(page.url(), /getcodepage/)
+
+    visits = 0
+    audit = nextAudit = '你暂无提交审核的版本或版本已发布上线'
+    await assert.rejects(confirmSubmittedReview(page, 'test', '1.0.5', { attempts: 2, timeout: 100 }), /结果尚未确认.*未找到本次版本 1.0.5/)
+    assert.equal(visits, 2)
+
+    visits = 0
+    audit = nextAudit = '版本号 1.0.5 审核失败'
+    await assert.rejects(confirmSubmittedReview(page, 'test', '1.0.5', { attempts: 1, timeout: 100 }), /后台状态为审核失败/)
+
+    await page.setRequestInterception(false)
+    await page.setContent('<button class="weui-desktop-btn_disabled">提交审核</button><script>setTimeout(() => document.querySelector("button").className = "", 200)</script>')
+    await assert.doesNotReject(assertReviewAvailable(page, { button: await page.$('button'), version: '1.0.5' }, { timeout: 2000 }))
+  }
+  finally { await browser.close() }
 })

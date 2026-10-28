@@ -1,97 +1,50 @@
 #!/usr/bin/env node
 
 import process from 'node:process'
-import { getPublishConfig, printPublishConfig, runHBuilderPublish } from './hbuilder-publish.js'
-import { failProgress } from './progress.js'
+import { pathToFileURL } from 'node:url'
+import { failProgress, finishProgress, promptInput } from './progress.js'
 import { runWechatRelease, runWechatReview } from './wechat-review.js'
 
-const VERSION = '1.8.1'
+const VERSION = '2.0.4'
 
-function printHelp() {
-  console.log(`Usage: mp [command] [options]
-
-Commands:
-  review            Submit the latest uploaded development version (default: mp)
-  release, r        Release the version that has passed review
-  config, c         Validate and display HBuilderX publishing configuration
-  full, f           Build and upload with HBuilderX, then submit that version
-
-Options:
-  --visible         Show Chrome and pause before the final action
-  -h, --help      Show help
-  -v, --version   Show version
-
-The login QR code is displayed in the current terminal.
-Review mode requires an existing uploaded development version.
-Release mode requires a reviewed version marked ready for release.
-Full mode builds and uploads through the configured HBuilderX CLI.
-Review notices and final confirmation dialogs are accepted automatically.`)
-}
-
-const rawArgs = process.argv.slice(2)
-const args = new Set(rawArgs)
-
-if (args.has('-h') || args.has('--help')) {
-  printHelp()
-  process.exit(0)
-}
-
-if (args.has('-v') || args.has('--version')) {
-  console.log(VERSION)
-  process.exit(0)
-}
-
-const commandAliases = new Map([
-  ['c', 'config'],
-  ['f', 'full'],
-  ['r', 'release'],
-])
-const rawCommand = rawArgs.find(arg => !arg.startsWith('-')) || 'review'
-const command = commandAliases.get(rawCommand) || rawCommand
-const supportedCommands = new Set(['review', 'release', 'config', 'full'])
-const supportedArgs = new Set(['-y', '--yes', '--visible', rawCommand])
-const unknownArgs = [...args].filter(arg => !supportedArgs.has(arg))
-if (unknownArgs.length > 0) {
-  console.error(`Unknown option: ${unknownArgs.join(', ')}`)
-  printHelp()
-  process.exit(2)
-}
-
-if (!supportedCommands.has(command)) {
-  console.error(`Unknown command: ${command}`)
-  printHelp()
-  process.exit(2)
-}
-
-const operation = async () => {
-  const visible = args.has('--visible')
-  if (command === 'review') {
-    await runWechatReview({ inspectBeforeSubmit: visible, visible })
+export async function main(args = process.argv.slice(2), {
+  prompt = promptInput,
+  review = runWechatReview,
+  release = runWechatRelease,
+  finish = finishProgress,
+} = {}) {
+  if (args.length === 1 && ['-v', '--version'].includes(args[0])) {
+    console.log(VERSION)
     return
   }
-
-  if (command === 'release') {
-    await runWechatRelease({ inspectBeforeSubmit: visible, visible })
+  if (args.length === 1 && ['-h', '--help'].includes(args[0])) {
+    console.log('使用：mp\n启动后输入 1 提审、2 发布、0 退出。\n浏览器全程可见，操作和输入在终端完成。')
     return
   }
+  if (args.length)
+    throw new Error('不支持此命令，请直接运行 mp，在菜单中选择提审或发布')
 
-  const config = getPublishConfig()
-  if (command === 'config') {
-    printPublishConfig(config)
+  let choice
+  do {
+    choice = (await prompt('微信小程序', '1 提审 / 2 发布 / 0 退出，请输入：')).trim()
+  } while (!['0', '1', '2'].includes(choice))
+
+  if (choice === '0') {
+    finish('微信小程序', '已退出')
     return
   }
-
-  await runHBuilderPublish(config)
-  await runWechatReview({
-    expectedVersion: config.version,
-    inspectBeforeSubmit: visible,
-    projectName: config.project,
-    visible,
-  })
+  await (choice === '1' ? review() : release())
 }
 
-operation()
-  .catch((error) => {
-    failProgress(error.message)
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch(async (error) => {
+    if (!error.reported) {
+      failProgress(error.message)
+      if (process.stdin.isTTY) {
+        try { await promptInput('微信小程序', '查看错误后按 Enter 退出：') }
+        catch { /* User cancelled. */ }
+      }
+    }
     process.exitCode = 1
   })
+}
