@@ -206,9 +206,9 @@ test('disabled review buttons report observed status without assuming an audit i
   try {
     const page = await browser.newPage()
     for (const [status, expected] of [
-      ['审核中', /后台审核状态：审核中.*无需重复提审/],
-      ['审核通过待发布', /后台审核状态：审核通过待发布.*选择 2 发布/],
-      ['', /未识别到明确的审核状态/],
+      ['审核中', /当前已有版本审核中，请等待审核结果/],
+      ['审核通过待发布', /当前版本已审核通过，请选择 2 发布/],
+      ['', /当前暂不可提审/],
     ]) {
       await page.setContent('<div class="mod_default_box"><h2>审核版本</h2>' + status + '</div><button class="weui-desktop-btn_disabled" title="平台暂不允许提交">提交审核</button>')
       const button = await page.$('button')

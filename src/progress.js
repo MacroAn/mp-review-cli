@@ -44,16 +44,16 @@ export function finishProgress(projectName, step) {
   qrLineCount = 0
 }
 
-export function failProgress(message) {
+export function failProgress(message, { label = '失败' } = {}) {
   if (initialized) {
-    updateProgress(activeProject, `失败：${message}`)
+    updateProgress(activeProject, `${label}：${message}`)
     process.stdout.write('\n')
     activeProject = null
     initialized = false
     qrLineCount = 0
     return
   }
-  process.stderr.write(`失败：${compactText(message)}\n`)
+  process.stderr.write(`${label}：${compactText(message)}\n`)
 }
 
 export function showQr(projectName, step, terminalQr) {

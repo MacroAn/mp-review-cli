@@ -403,7 +403,6 @@ export async function assertReviewAvailable(page, selectedVersion, { timeout = 1
   const button = await selectedVersion.button.evaluate(element => ({
     disabled: element.classList.contains('weui-desktop-btn_disabled')
       || element.disabled === true || element.getAttribute('aria-disabled') === 'true',
-    hint: element.getAttribute('title') || element.getAttribute('data-tooltip') || '',
   }))
   if (!button.disabled)
     return
@@ -419,12 +418,10 @@ export async function assertReviewAvailable(page, selectedVersion, { timeout = 1
     return ['审核通过待发布', '审核中', '审核不通过', '审核失败', '已撤回']
       .find(value => text.includes(value)) || ''
   })
-  const version = selectedVersion.version || parseVersionNumber(selectedVersion.text)
-  const detail = status ? `；后台审核状态：${status}` : '；未识别到明确的审核状态'
-  const advice = status === '审核中' ? '。请等待审核结果，无需重复提审'
-    : status === '审核通过待发布' ? '。若要上线已通过审核的版本，请退出后选择 2 发布'
-      : '。请查看浏览器版本管理页中的限制说明'
-  throw new Error(`开发版本 ${version} 的提交审核按钮已禁用${detail}${button.hint ? `；按钮提示：${button.hint}` : ''}${advice}`)
+  const message = status === '审核中' ? '当前已有版本审核中，请等待审核结果'
+    : status === '审核通过待发布' ? '当前版本已审核通过，请选择 2 发布'
+      : '当前暂不可提审，请查看浏览器中的提示'
+  throw Object.assign(new Error(message), { notice: true })
 }
 
 async function openAuditForm(browser, page, selectedVersion) {

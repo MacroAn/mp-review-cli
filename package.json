@@ -1,6 +1,6 @@
 {
   "name": "mp-review-cli",
-  "version": "2.0.5",
+  "version": "2.0.6",
   "private": true,
   "description": "Visible browser automation for WeChat Mini Program review and release.",
   "type": "module",
