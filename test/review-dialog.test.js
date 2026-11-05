@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import test from 'node:test'
 import puppeteer from 'puppeteer-core'
+import QRCode from 'qrcode-terminal/vendor/QRCode/index.js'
+import { finishProgress } from '../src/progress.js'
 import {
   acceptReviewRules,
   assertReviewAvailable,
@@ -11,6 +13,7 @@ import {
   selectLatestDevelopmentVersion,
   submitAudit,
   submitRelease,
+  showReleaseQr,
   waitAndClickVisibleButton,
 } from '../src/wechat-review.js'
 
@@ -18,6 +21,70 @@ const browserPaths = [
   'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
   'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
 ]
+
+test('direct release QR dialogs render in the terminal without exact verification wording', { timeout: 15000 }, async () => {
+  const browser = await puppeteer.launch({ executablePath: browserPaths.find(p => fs.existsSync(p)), headless: true })
+  const content = 'https://example.com/release-verification-test'
+  const qr = new QRCode(-1, 1)
+  qr.addData(content)
+  qr.make()
+  try {
+    const page = await browser.newPage()
+    for (const prompt of ['', '请使用微信扫码确认发布']) {
+      await page.setContent(`
+        <button id="release">提交发布</button>
+        <div class="weui-desktop-dialog" style="display:none">发布线上版本<button onclick="throw new Error('hidden confirmation clicked')">提交</button></div>
+        <div role="dialog" id="verification" style="display:none">
+          <h4>发布版本</h4><p>${prompt}</p>
+          <img style="display:none" src="invalid"><canvas width="1" height="1"></canvas>
+        </div>
+        <script>
+          document.querySelector('#release').onclick = () => {
+            document.querySelector('#verification').style.display = 'block'
+          }
+        </script>
+      `)
+      // Delay drawing to cover a dialog that appears before the QR is loaded.
+      await page.evaluate((modules) => {
+        setTimeout(() => {
+          const canvas = document.querySelector('canvas')
+          const size = modules.length
+          canvas.width = canvas.height = (size + 8) * 6
+          const ctx = canvas.getContext('2d')
+          ctx.fillStyle = 'white'
+          ctx.fillRect(0, 0, canvas.width, canvas.height)
+          ctx.fillStyle = 'black'
+          modules.forEach((row, y) => row.forEach((dark, x) => {
+            if (dark) ctx.fillRect((x + 4) * 6, (y + 4) * 6, 6, 6)
+          }))
+        }, 300)
+      }, qr.modules)
+      const selected = { button: await page.$('#release'), version: '1.2.3', developer: 'tester', submittedAt: '2026-11-05', auditNote: '未提供' }
+      let output = ''
+      let requested = 0
+      const write = process.stdout.write
+      try {
+        process.stdout.write = (chunk) => { output += chunk; return true }
+        assert.equal(await submitRelease(page, selected, {
+          onVerificationRequired: async () => {
+            requested++
+            await showReleaseQr(page, 'test-project', selected)
+            assert.match(output, /请再次使用微信扫描二维码验证发布/)
+            assert.match(output, /[▀▄█]/)
+            assert.match(output, /版本号：1\.2\.3/)
+            await page.evaluate(() => { document.body.textContent = '发布成功' })
+          },
+        }), true)
+        assert.equal(requested, 1)
+      }
+      finally {
+        finishProgress('test-project', 'done')
+        process.stdout.write = write
+      }
+    }
+  }
+  finally { await browser.close() }
+})
 
 test('accepts the current review notice dialog and clicks next', async () => {
   const executablePath = browserPaths.find(browserPath => fs.existsSync(browserPath))

@@ -490,31 +490,47 @@ export async function submitAudit(page) {
   return true
 }
 
-async function showReleaseQr(page, projectName, selectedVersion) {
-  await page.waitForFunction(() => {
-    const isVisible = (element) => {
-      const style = window.getComputedStyle(element)
-      return style.display !== 'none' && style.visibility !== 'hidden' && element.getClientRects().length > 0
-    }
-    return [...document.querySelectorAll('.weui-desktop-dialog__wrp, .weui-desktop-dialog')]
-      .some(element => isVisible(element) && (element.textContent || '').includes('请使用微信扫描二维码进行验证'))
-  }, { timeout: PAGE_TIMEOUT_MS })
+// Runs in the page. Match the release dialog itself, independent of exact scan wording.
+function findReleaseDialog(kind) {
+  const isVisible = (element) => {
+    const style = window.getComputedStyle(element)
+    return style.display !== 'none' && style.visibility !== 'hidden' && element.getClientRects().length > 0
+  }
+  const dialogs = [...document.querySelectorAll('.weui-desktop-dialog__wrp, .weui-desktop-dialog, [role="dialog"]')]
+    .filter(isVisible)
+    .sort((left, right) => left.contains(right) ? 1 : right.contains(left) ? -1 : 0)
+  const verification = dialogs.find((dialog) => {
+    const text = (dialog.textContent || '').replace(/\s+/g, '')
+    return text.includes('发布') && (
+      /扫码|扫描.*二维码/.test(text)
+      || (text.includes('发布版本') && [...dialog.querySelectorAll('img, canvas')].some(isVisible))
+    )
+  })
+  if (kind === 'verification' || verification)
+    return verification || null
+  return dialogs.find(dialog => (dialog.textContent || '').includes('发布线上版本')
+    && [...dialog.querySelectorAll('button, a, input[type="submit"], [role="button"], .btn_primary')]
+      .some(element => isVisible(element) && !element.disabled
+        && (element.value || element.textContent || '').trim() === '提交')) || null
+}
+
+export async function showReleaseQr(page, projectName, selectedVersion) {
+  const ready = await page.waitForFunction(findReleaseDialog, { timeout: PAGE_TIMEOUT_MS }, 'verification')
+  await ready.dispose()
 
   for (let attempt = 0; attempt < 20; attempt++) {
-    const dialogs = await page.$$('.weui-desktop-dialog__wrp, .weui-desktop-dialog')
-    for (const dialog of dialogs) {
-      const visible = await dialog.evaluate((element) => {
-        const style = window.getComputedStyle(element)
-        return style.display !== 'none'
-          && style.visibility !== 'hidden'
-          && element.getClientRects().length > 0
-          && (element.textContent || '').includes('请使用微信扫描二维码进行验证')
-      })
-      if (!visible)
+    const handle = await page.evaluateHandle(findReleaseDialog, 'verification')
+    const dialog = handle.asElement()
+    try {
+      if (!dialog) {
+        await sleep(500)
         continue
+      }
 
       const qrElements = await dialog.$$('img, canvas')
       for (const element of [...qrElements, dialog]) {
+        if (!await element.isVisible())
+          continue
         const screenshot = await element.screenshot({ type: 'png' })
         const png = PNG.sync.read(Buffer.from(screenshot))
         const decoded = jsQR(new Uint8ClampedArray(png.data), png.width, png.height)
@@ -526,6 +542,9 @@ async function showReleaseQr(page, projectName, selectedVersion) {
         }
       }
     }
+    finally {
+      await handle.dispose()
+    }
     await sleep(500)
   }
 
@@ -534,55 +553,41 @@ async function showReleaseQr(page, projectName, selectedVersion) {
 
 export async function submitRelease(page, selectedVersion, { onVerificationRequired } = {}) {
   await selectedVersion.button.click()
-  await page.waitForFunction(() => {
-    const isVisible = (element) => {
-      const style = window.getComputedStyle(element)
-      return style.display !== 'none' && style.visibility !== 'hidden' && element.getClientRects().length > 0
-    }
-    return [...document.querySelectorAll('.weui-desktop-dialog__wrp, .weui-desktop-dialog')]
-      .some((dialog) => {
-        if (!isVisible(dialog) || !(dialog.textContent || '').includes('发布线上版本'))
-          return false
-        return [...dialog.querySelectorAll('button, a, input[type="submit"], [role="button"], .btn_primary')]
-          .some((element) => {
+  const next = await page.waitForFunction(findReleaseDialog, { timeout: PAGE_TIMEOUT_MS }, 'next')
+  await next.dispose()
+  const verification = await page.evaluateHandle(findReleaseDialog, 'verification')
+  const verificationOpen = Boolean(verification.asElement())
+  await verification.dispose()
+  if (!verificationOpen) {
+    const submitted = await page.evaluate(() => {
+      const isVisible = (element) => {
+        const style = window.getComputedStyle(element)
+        return style.display !== 'none' && style.visibility !== 'hidden' && element.getClientRects().length > 0
+      }
+      const dialogs = [...document.querySelectorAll('.weui-desktop-dialog__wrp, .weui-desktop-dialog, [role="dialog"]')]
+        .filter(element => isVisible(element) && (element.textContent || '').includes('发布线上版本'))
+        .sort((left, right) => left.contains(right) ? 1 : right.contains(left) ? -1 : 0)
+
+      for (const dialog of dialogs) {
+        const button = [...dialog.querySelectorAll('button, a, input[type="submit"], [role="button"], .btn_primary')]
+          .find((element) => {
             const text = (element.value || element.textContent || element.getAttribute('aria-label') || '')
               .replace(/\s+/g, ' ')
               .trim()
-            return isVisible(element) && text === '提交'
+            return isVisible(element) && !element.disabled && text === '提交'
           })
-      })
-  }, { timeout: PAGE_TIMEOUT_MS })
-
-  const submitted = await page.evaluate(() => {
-    const isVisible = (element) => {
-      const style = window.getComputedStyle(element)
-      return style.display !== 'none' && style.visibility !== 'hidden' && element.getClientRects().length > 0
-    }
-    const dialogs = [...document.querySelectorAll('.weui-desktop-dialog__wrp, .weui-desktop-dialog')]
-      .filter(element => isVisible(element) && (element.textContent || '').includes('发布线上版本'))
-      .sort((left, right) => left.contains(right) ? 1 : right.contains(left) ? -1 : 0)
-
-    for (const dialog of dialogs) {
-      const button = [...dialog.querySelectorAll('button, a, input[type="submit"], [role="button"], .btn_primary')]
-        .find((element) => {
-          const text = (element.value || element.textContent || element.getAttribute('aria-label') || '')
-            .replace(/\s+/g, ' ')
-            .trim()
-          return isVisible(element) && text === '提交'
-        })
-      if (button instanceof HTMLElement) {
-        button.click()
-        return true
+        if (button instanceof HTMLElement) {
+          button.click()
+          return true
+        }
       }
-    }
-    return false
-  })
-  if (!submitted)
-    throw new Error('未找到“发布线上版本”弹窗中的提交按钮')
-
-  await page.waitForFunction(() => document.body.innerText.includes('请使用微信扫描二维码进行验证'), {
-    timeout: PAGE_TIMEOUT_MS,
-  })
+      return false
+    })
+    if (!submitted)
+      throw new Error('未找到“发布线上版本”弹窗中的提交按钮')
+  }
+  const ready = await page.waitForFunction(findReleaseDialog, { timeout: PAGE_TIMEOUT_MS }, 'verification')
+  await ready.dispose()
   await onVerificationRequired?.(page)
 
   await page.waitForFunction((version) => {

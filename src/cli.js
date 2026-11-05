@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 
 import process from 'node:process'
+import { readFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 import { failProgress, finishProgress, promptInput } from './progress.js'
 import { runWechatRelease, runWechatReview } from './wechat-review.js'
 
-const VERSION = '2.0.6'
+const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version
 
 export async function main(args = process.argv.slice(2), {
   prompt = promptInput,
