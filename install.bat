@@ -5,7 +5,7 @@ setlocal EnableExtensions DisableDelayedExpansion
 for %%I in ("%~dp0.") do set "SCRIPT_DIR=%%~fI"
 set "USER_NPM=%APPDATA%\npm"
 
-echo [1/6] Checking Node.js and npm...
+echo [1/7] Checking Node.js and npm...
 where node >nul 2>nul || goto :missing_node
 where npm >nul 2>nul || goto :missing_node
 
@@ -13,20 +13,25 @@ for /f "usebackq delims=" %%V in (`node -p "Number(process.versions.node.split('
 if not defined NODE_MAJOR goto :missing_node
 if %NODE_MAJOR% LSS 20 goto :old_node
 
-echo [2/6] Installing project dependencies...
+echo [2/7] Configuring the QR code download directory...
+node "%SCRIPT_DIR%\configure-download.js"
+if errorlevel 1 goto :failed
+if /i "%~1"=="/config" goto :success
+
+echo [3/7] Installing project dependencies...
 pushd "%SCRIPT_DIR%"
 call npm install --omit=dev
 set "NPM_RESULT=%ERRORLEVEL%"
 if not "%NPM_RESULT%"=="0" goto :install_failed_popd
 
-echo [3/6] Installing the global mp command...
+echo [4/7] Installing the global mp command...
 if not exist "%USER_NPM%" mkdir "%USER_NPM%"
 call npm install -g --prefix "%USER_NPM%" --install-links=true "%SCRIPT_DIR%"
 set "NPM_RESULT=%ERRORLEVEL%"
 if not "%NPM_RESULT%"=="0" goto :install_failed_popd
 popd
 
-echo [4/6] Checking the user PATH...
+echo [5/7] Checking the user PATH...
 set "MP_USER_BIN=%USER_NPM%"
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$bin=$env:MP_USER_BIN; $path=[Environment]::GetEnvironmentVariable('Path','User');" ^
@@ -38,11 +43,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
 if errorlevel 1 goto :path_failed
 set "PATH=%USER_NPM%;%PATH%"
 
-echo [5/6] Configuring PowerShell command resolution...
+echo [6/7] Configuring PowerShell command resolution...
 powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%\configure-powershell.ps1"
 if errorlevel 1 goto :powershell_failed
 
-echo [6/6] Verifying the installation...
+echo [7/7] Verifying the installation...
 set "VERIFY_ATTEMPT=0"
 
 :verify_retry

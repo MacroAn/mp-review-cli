@@ -1,6 +1,24 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { execFileSync } from 'node:child_process'
 import { captureBrowserWindow, keepBrowserBehindTerminal } from '../src/browser-window.js'
+
+test('native window management excludes link bubbles, tool windows and owned save dialogs', { skip: process.platform !== 'win32' }, () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'mp-window-test-'))
+  try {
+    const compiler = ['Framework64', 'Framework'].map(folder => path.join(process.env.SystemRoot, 'Microsoft.NET', folder, 'v4.0.30319', 'csc.exe')).find(p => fs.existsSync(p))
+    const executable = path.join(directory, 'window-test.exe')
+    execFileSync(compiler, ['/nologo', '/target:exe', '/main:WindowFrameTest', '/reference:System.Windows.Forms.dll', '/reference:System.Drawing.dll', `/out:${executable}`,
+      fileURLToPath(new URL('../src/browser-window.cs', import.meta.url)), fileURLToPath(new URL('./window-frame.cs', import.meta.url)),
+    ], { windowsHide: true, timeout: 15000 })
+    assert.match(execFileSync(executable, { windowsHide: true, timeout: 10000, encoding: 'utf8' }), /window classification passed/)
+  }
+  finally { fs.rmSync(directory, { recursive: true, force: true }) }
+})
 
 test('window capture starts the native helper directly', () => {
   const geometry = { width: 1200, height: 800, left: -1200, top: 40, terminalHandle: '123' }

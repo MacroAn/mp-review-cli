@@ -1,4 +1,6 @@
 import { withBrowserSession } from './browser-session.js'
+import { prepareCodeDownload, downloadWithBrowser } from './wechat-download.js'
+import { getDownloadDirectory, ensureDownloadDirectory } from './download-config.js'
 import { captureBrowserWindow, keepBrowserBehindTerminal } from './browser-window.js'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -660,7 +662,7 @@ export async function confirmSubmittedReview(page, token, version, { attempts = 
   }
 }
 
-async function openVersionManagementPage(browser, projectName) {
+async function loginWechat(browser, projectName) {
   const loginPage = await browser.newPage()
   await withSpinner(projectName, '正在打开微信公众平台', () => (
     loginPage.goto(LOGIN_URL, { waitUntil: 'domcontentloaded', timeout: PAGE_TIMEOUT_MS })
@@ -669,9 +671,41 @@ async function openVersionManagementPage(browser, projectName) {
   await showLoginQr(loginPage, projectName)
 
   const authenticated = await withSpinner(projectName, '扫码后正在等待登录完成', () => waitForAuthenticatedPage(browser))
+  return authenticated
+}
+
+async function openVersionManagementPage(browser, projectName) {
+  const authenticated = await loginWechat(browser, projectName)
   updateProgress(projectName, '登录成功，正在打开版本管理')
   await withSpinner(projectName, '登录成功，正在打开版本管理', () => openAuthenticatedVersionPage(authenticated.page, authenticated.token))
   return authenticated.page
+}
+
+export async function runWechatDownload() {
+  const projectName = path.basename(process.cwd())
+  const downloadPath = ensureDownloadDirectory(getDownloadDirectory())
+  const browser = await withSpinner(projectName, '准备打开微信公众平台', launchVisibleBrowser)
+  return withBrowserSession(browser, projectName, async () => {
+    const { page, token } = await loginWechat(browser, projectName)
+    let stopStep
+    let button
+    try {
+      button = await prepareCodeDownload(page, { token, onStep: (step) => {
+        stopStep?.()
+        // Explicitly clear the login QR before starting the next step's spinner.
+        updateProgress(projectName, step)
+        stopStep = startSpinner(projectName, step)
+      } })
+    }
+    finally { stopStep?.() }
+    try {
+      const filename = await withSpinner(projectName, `正在下载小程序码，保存目录：${downloadPath}`, () => (
+        downloadWithBrowser(browser, () => button.click(), { downloadPath })
+      ))
+      finishProgress(projectName, `小程序码下载完成（智能取色、50cm）：${filename}，保存目录：${downloadPath}`)
+    }
+    finally { await button.dispose() }
+  })
 }
 
 async function launchVisibleBrowser() {

@@ -4,7 +4,7 @@ import process from 'node:process'
 import { readFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 import { failProgress, finishProgress, promptInput } from './progress.js'
-import { runWechatRelease, runWechatReview } from './wechat-review.js'
+import { runWechatDownload, runWechatRelease, runWechatReview } from './wechat-review.js'
 
 const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version
 
@@ -12,6 +12,7 @@ export async function main(args = process.argv.slice(2), {
   prompt = promptInput,
   review = runWechatReview,
   release = runWechatRelease,
+  download = runWechatDownload,
   finish = finishProgress,
 } = {}) {
   if (args.length === 1 && ['-v', '--version'].includes(args[0])) {
@@ -19,22 +20,22 @@ export async function main(args = process.argv.slice(2), {
     return
   }
   if (args.length === 1 && ['-h', '--help'].includes(args[0])) {
-    console.log('使用：mp\n启动后输入 1 提审、2 发布、0 退出。\n浏览器全程可见，操作和输入在终端完成。')
+    console.log('使用：mp\n启动后输入 1 提审、2 发布、3 下载二维码、0 退出。\n浏览器全程可见，操作和输入在终端完成。')
     return
   }
   if (args.length)
-    throw new Error('不支持此命令，请直接运行 mp，在菜单中选择提审或发布')
+    throw new Error('不支持此命令，请直接运行 mp，在菜单中选择提审、发布或下载二维码')
 
   let choice
   do {
-    choice = (await prompt('微信小程序', '1 提审 / 2 发布 / 0 退出，请输入：')).trim()
-  } while (!['0', '1', '2'].includes(choice))
+    choice = (await prompt('微信小程序', '1 提审 / 2 发布 / 3 下载二维码 / 0 退出，请输入：')).trim()
+  } while (!['0', '1', '2', '3'].includes(choice))
 
   if (choice === '0') {
     finish('微信小程序', '已退出')
     return
   }
-  await (choice === '1' ? review() : release())
+  await ({ 1: review, 2: release, 3: download })[choice]()
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

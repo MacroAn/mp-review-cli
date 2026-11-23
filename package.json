@@ -1,6 +1,6 @@
 {
   "name": "mp-review-cli",
-  "version": "2.0.7",
+  "version": "2.0.12",
   "private": true,
   "description": "Visible browser automation for WeChat Mini Program review and release.",
   "type": "module",
@@ -9,7 +9,7 @@
     "wxmp": "src/cli.js"
   },
   "scripts": {
-    "check": "node --check src/cli.js && node --check src/progress.js && node --check src/wechat-review.js && node --check src/browser-window.js && node --check src/browser-session.js",
+    "check": "node --check configure-download.js && node --check src/download-config.js && node --check src/wechat-download.js && node --check src/cli.js && node --check src/progress.js && node --check src/wechat-review.js && node --check src/browser-window.js && node --check src/browser-session.js",
     "start": "node src/cli.js",
     "test": "node --test"
   },

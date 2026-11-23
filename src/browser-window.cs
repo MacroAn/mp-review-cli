@@ -14,6 +14,8 @@ internal static class BrowserWindow {
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr window);
     [DllImport("user32.dll")] private static extern bool IsWindow(IntPtr window);
     [DllImport("user32.dll")] private static extern bool IsIconic(IntPtr window);
+    [DllImport("user32.dll")] private static extern int GetWindowLong(IntPtr window, int index);
+    [DllImport("user32.dll")] private static extern IntPtr GetWindow(IntPtr window, uint command);
     [DllImport("user32.dll")] private static extern bool EnumWindows(WindowCallback callback, IntPtr state);
     [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr window);
     [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);
@@ -21,6 +23,17 @@ internal static class BrowserWindow {
     private static bool Running(int id) {
         try { using (var process = Process.GetProcessById(id)) return !process.HasExited; }
         catch (ArgumentException) { return false; }
+    }
+
+    private static bool IsBrowserFrame(IntPtr window) {
+        const int WS_CAPTION = 0x00C00000, WS_THICKFRAME = 0x00040000;
+        const int WS_EX_TOOLWINDOW = 0x00000080, WS_EX_NOACTIVATE = 0x08000000;
+        int style = GetWindowLong(window, -16), extendedStyle = GetWindowLong(window, -20);
+        // Chrome also owns link-status bubbles, tooltips and native Save As dialogs.
+        // Only resize unowned, resizable application frames; leave those surfaces alone.
+        return (style & (WS_CAPTION | WS_THICKFRAME)) == (WS_CAPTION | WS_THICKFRAME)
+            && (extendedStyle & (WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE)) == 0
+            && GetWindow(window, 4) == IntPtr.Zero; // GW_OWNER
     }
 
     private static void Capture() {
@@ -53,7 +66,7 @@ internal static class BrowserWindow {
         WindowCallback callback = delegate(IntPtr window, IntPtr state) {
             uint windowId;
             GetWindowThreadProcessId(window, out windowId);
-            if (windowId != browserId || !IsWindowVisible(window)) return true;
+            if (windowId != browserId || !IsWindowVisible(window) || !IsBrowserFrame(window)) return true;
             bool ready = IsWindow(terminal) && IsWindowVisible(terminal) && !IsIconic(terminal);
             var foreground = GetForegroundWindow();
             if (!positioned.Contains(window)) {

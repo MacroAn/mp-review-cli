@@ -2,13 +2,14 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { main } from '../src/cli.js'
 
-for (const [choice, expected] of [['1', 'review'], ['2', 'release'], ['0', 'exit']]) {
+for (const [choice, expected] of [['1', 'review'], ['2', 'release'], ['3', 'download'], ['0', 'exit']]) {
   test('menu choice ' + choice + ' runs only ' + expected, async () => {
     const calls = []
     await main([], {
       prompt: async () => choice,
       review: async () => calls.push('review'),
       release: async () => calls.push('release'),
+      download: async () => calls.push('download'),
       finish: () => calls.push('exit'),
     })
     assert.deepEqual(calls, [expected])
